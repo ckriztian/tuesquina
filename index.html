@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#f4f4ee">
+  <title>La Esquina — Kiosco</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="#" aria-label="Inicio La Esquina">
+        <span class="brand-mark">LE</span>
+        <span>LA<br>ESQUINA</span>
+      </a>
+
+      <nav class="main-nav" aria-label="Navegación principal">
+        <button class="nav-item active" data-view="pos"><span class="nav-icon">▦</span><span>Vender</span></button>
+        <button class="nav-item" data-view="inventory"><span class="nav-icon">□</span><span>Inventario</span></button>
+        <button class="nav-item" data-view="purchases"><span class="nav-icon">⇩</span><span>Compras</span></button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <span class="status-dot"></span>
+        <div><strong>Sistema activo</strong><small id="currentDate"></small></div>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <section class="view active" id="pos-view">
+        <header class="page-header">
+          <div><p class="eyebrow">PUNTO DE VENTA</p><h1>Nueva venta</h1></div>
+          <div class="header-actions"><span class="clock" id="clock">--:--</span><button class="round-button" id="clearSale" title="Vaciar venta" aria-label="Vaciar venta">↻</button></div>
+        </header>
+
+        <div class="pos-layout">
+          <div class="catalog-panel">
+            <label class="search-box"><span>⌕</span><input id="productSearch" type="search" placeholder="Buscar producto..." autocomplete="off"></label>
+            <div class="filter-row" id="stockFilters">
+              <button class="filter active" data-filter="all">Todos</button>
+              <button class="filter" data-filter="available">Disponibles</button>
+              <button class="filter" data-filter="low">Stock bajo</button>
+            </div>
+            <div class="product-grid" id="productGrid"></div>
+          </div>
+
+          <aside class="cart-panel">
+            <div class="cart-title"><div><p class="eyebrow">VENTA ACTUAL</p><h2>Detalle</h2></div><span class="item-count" id="cartCount">0 ITEMS</span></div>
+            <div class="cart-items" id="cartItems"></div>
+            <div class="cart-summary">
+              <div><span>Subtotal</span><strong id="subtotal">$0,00</strong></div>
+              <div class="total-row"><span>Total</span><strong id="total">$0,00</strong></div>
+              <button class="primary-button" id="completeSale">COBRAR <span>→</span></button>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="view" id="inventory-view">
+        <header class="page-header">
+          <div><p class="eyebrow">CONTROL DE EXISTENCIAS</p><h1>Inventario</h1></div>
+          <button class="primary-button compact" id="addProduct">＋ NUEVO PRODUCTO</button>
+        </header>
+        <div class="metrics" id="inventoryMetrics"></div>
+        <div class="table-card">
+          <div class="table-toolbar"><label class="search-box"><span>⌕</span><input id="inventorySearch" type="search" placeholder="Buscar en inventario..."></label><span id="inventoryCount"></span></div>
+          <div class="table-wrap"><table><thead><tr><th>Producto</th><th>Precio</th><th>Stock</th><th>Valor</th><th></th></tr></thead><tbody id="inventoryTable"></tbody></table></div>
+        </div>
+      </section>
+
+      <section class="view" id="purchases-view">
+        <header class="page-header">
+          <div><p class="eyebrow">ABASTECIMIENTO</p><h1>Compras a proveedor</h1></div>
+          <button class="primary-button compact" id="newPurchase">＋ REGISTRAR COMPRA</button>
+        </header>
+        <div class="metrics" id="purchaseMetrics"></div>
+        <div class="table-card">
+          <div class="table-toolbar"><div><p class="eyebrow">HISTORIAL</p><h2>Últimas compras</h2></div></div>
+          <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Proveedor</th><th>Producto</th><th>Cantidad</th><th>Costo total</th></tr></thead><tbody id="purchasesTable"></tbody></table></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="productDialog">
+    <form method="dialog" id="productForm">
+      <div class="dialog-head"><div><p class="eyebrow">CATÁLOGO</p><h2 id="productDialogTitle">Nuevo producto</h2></div><button type="button" class="close-button" data-close="productDialog">×</button></div>
+      <input type="hidden" id="productId">
+      <label>Nombre del producto<input id="productName" required maxlength="50" placeholder="Ej. Yerba mate"></label>
+      <div class="form-row"><label>Precio de venta<input id="productPrice" required type="number" min="0.01" step="0.01" placeholder="0,00"></label><label>Stock inicial<input id="productStock" required type="number" min="0" step="1" placeholder="0"></label></div>
+      <div class="dialog-actions"><button type="button" class="secondary-button" data-close="productDialog">Cancelar</button><button class="primary-button compact" value="default">GUARDAR PRODUCTO</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="purchaseDialog">
+    <form method="dialog" id="purchaseForm">
+      <div class="dialog-head"><div><p class="eyebrow">NUEVO INGRESO</p><h2>Registrar compra</h2></div><button type="button" class="close-button" data-close="purchaseDialog">×</button></div>
+      <label>Proveedor<input id="supplierName" required maxlength="50" placeholder="Nombre del proveedor"></label>
+      <label>Producto<select id="purchaseProduct" required></select></label>
+      <div class="form-row"><label>Cantidad recibida<input id="purchaseQuantity" required type="number" min="1" step="1" placeholder="0"></label><label>Costo total<input id="purchaseCost" required type="number" min="0" step="0.01" placeholder="0,00"></label></div>
+      <p class="form-note">Al guardar, la cantidad se sumará automáticamente al inventario.</p>
+      <div class="dialog-actions"><button type="button" class="secondary-button" data-close="purchaseDialog">Cancelar</button><button class="primary-button compact" value="default">REGISTRAR COMPRA</button></div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status"></div>
+  <script src="app.js"></script>
+</body>
+</html>
