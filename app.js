@@ -5,7 +5,7 @@
    ya guardada en el navegador se conserva sin cambios.
    ========================================================================= */
 
-const STORAGE = { products: 'laEsquina.products', purchases: 'laEsquina.purchases', sales: 'laEsquina.sales', theme: 'laEsquina.theme' };
+const STORAGE = { products: 'laEsquina.products', purchases: 'laEsquina.purchases', sales: 'laEsquina.sales', costHistory: 'laEsquina.costHistory', theme: 'laEsquina.theme' };
 const UNITS = ['Unidad', 'Gramos', 'Kilogramos', 'Mililitros', 'Litros'];
 
 const seedProducts = [
@@ -33,10 +33,18 @@ function load(key, fallback) {
   catch { return structuredClone(fallback); }
 }
 function normalizeProduct(p) {
+  // Migración no destructiva: `price` sigue disponible para todas las vistas
+  // históricas, pero ya no se interpreta como costo.
+  const precioVenta = Math.max(0, number(p.precioVenta ?? p.price));
+  const costoPromedio = Math.max(0, number(p.costoPromedio ?? p.averageCost ?? 0));
+  const stockMinimo = Math.max(0, Math.floor(number(p.stockMinimo ?? p.minStock ?? 5)));
   return {
     id: p.id || uid(), name: String(p.name || 'Producto sin nombre'), brand: String(p.brand || 'Sin marca'),
-    category: String(p.category || 'General'), code: String(p.code || ''), price: Math.max(0, number(p.price)),
-    stock: Math.max(0, Math.floor(number(p.stock))), minStock: Math.max(0, Math.floor(number(p.minStock ?? 5))),
+    category: String(p.category || 'General'), code: String(p.code || ''), price: precioVenta, precioVenta,
+    costoPromedio, ultimoCostoCompra: Math.max(0, number(p.ultimoCostoCompra ?? p.lastPurchaseCost ?? costoPromedio)),
+    porcentajeRecargoPredeterminado: Math.max(0, number(p.porcentajeRecargoPredeterminado ?? 30)),
+    fechaUltimaCompra: p.fechaUltimaCompra || '',
+    stock: Math.max(0, Math.floor(number(p.stock))), minStock: stockMinimo, stockMinimo,
     content: Math.max(0, number(p.content)), unit: UNITS.includes(p.unit) ? p.unit : 'Unidad',
     expiration: p.expiration || '', batches: Array.isArray(p.batches) ? p.batches : []
   };
@@ -53,6 +61,7 @@ function normalizeSale(s) {
 let products = load(STORAGE.products, seedProducts).map(normalizeProduct);
 let purchases = load(STORAGE.purchases, []).map(normalizePurchase);
 let sales = load(STORAGE.sales, []).map(normalizeSale);
+let costHistory = load(STORAGE.costHistory, []);
 let cart = [];
 let catalogFilter = 'all', expirationFilter = 'all', bulkCandidates = [];
 let lastDeleted = null;
@@ -61,6 +70,7 @@ function save() {
   localStorage.setItem(STORAGE.products, JSON.stringify(products));
   localStorage.setItem(STORAGE.purchases, JSON.stringify(purchases));
   localStorage.setItem(STORAGE.sales, JSON.stringify(sales));
+  localStorage.setItem(STORAGE.costHistory, JSON.stringify(costHistory));
 }
 save();
 
@@ -93,6 +103,7 @@ function daysUntil(value) { const date = localDate(value); return date ? Math.ro
 function formatDate(value, withTime = false) { if (!value) return 'Sin fecha'; const date = value.includes?.('T') ? new Date(value) : localDate(value); return date.toLocaleString('es-AR', withTime ? { dateStyle: 'short', timeStyle: 'short' } : { dateStyle: 'short' }); }
 function expirationState(p) { const days = daysUntil(p.expiration); if (days === null) return 'none'; if (days < 0) return 'expired'; if (days <= 7) return 'urgent'; if (days <= 30) return 'soon'; return 'safe'; }
 function stockState(p) { return p.stock === 0 ? 'empty' : p.stock <= p.minStock ? 'low' : 'ok'; }
+function configuredMinimumMargin() { try { return number(JSON.parse(localStorage.getItem('laEsquina.settings'))?.minimumMargin ?? 20); } catch { return 20; } }
 function metric(label, value, detail = '', kind = '') { return `<div class="metric ${kind}"><span>${label}</span><strong>${value}</strong>${detail ? `<small>${detail}</small>` : ''}</div>`; }
 
 /* ---------------------------------------------------------------------
@@ -246,10 +257,12 @@ function renderInventory() {
   $('#inventoryCount').textContent = `${filtered.length} productos`;
   $('#inventoryTable').innerHTML = filtered.length
     ? filtered.map(p => {
-      const exp = expirationState(p), expClass = exp === 'urgent' || exp === 'soon' ? 'soon' : exp;
-      return `<tr><td><strong>${escapeHtml(p.name)}</strong><small>${escapeHtml(p.brand)} · ${escapeHtml(presentation(p))}${p.code ? ` · ${escapeHtml(p.code)}` : ''}</small></td><td>${escapeHtml(p.category)}</td><td><strong class="num">${money(p.price)}</strong></td><td><span class="badge ${p.stock <= p.minStock ? 'low' : ''}">${p.stock} / mín. ${p.minStock}</span></td><td><span class="badge ${expClass}">${formatDate(p.expiration)}</span></td><td><div class="table-actions"><button class="icon-button" data-edit="${p.id}" title="Editar">✎</button><button class="icon-button delete" data-delete="${p.id}" title="Eliminar">×</button></div></td></tr>`;
+      const profit = p.precioVenta - p.costoPromedio;
+      const markup = p.costoPromedio > 0 ? profit / p.costoPromedio * 100 : 0;
+      const state = p.costoPromedio > 0 && profit < 0 ? ['Venta con pérdida', 'loss'] : p.costoPromedio > 0 && markup < configuredMinimumMargin() ? ['Margen bajo', 'low'] : ['Rentable', 'profitable'];
+      return `<tr><td><strong>${escapeHtml(p.name)}</strong><small>${escapeHtml(p.brand)} · ${escapeHtml(p.presentation || presentation(p))}</small></td><td><span class="badge ${p.stock <= p.minStock ? 'low' : ''}">${p.stock} / mín. ${p.minStock}</span></td><td class="num">${money(p.ultimoCostoCompra)}</td><td class="num">${money(p.costoPromedio)}</td><td class="num">${money(p.precioVenta)}</td><td class="num ${profit < 0 ? 'negative' : ''}">${money(profit)}</td><td class="num">${markup.toFixed(2)}%</td><td><span class="profit-state ${state[1]}">${state[0]}</span></td><td><div class="table-actions"><button class="icon-button" data-edit="${p.id}" title="Editar">✎</button><button class="icon-button delete" data-delete="${p.id}" title="Eliminar">×</button></div></td></tr>`;
     }).join('')
-    : '<tr><td colspan="6">No se encontraron productos.</td></tr>';
+    : '<tr><td colspan="9">No se encontraron productos.</td></tr>';
 }
 
 /* ---------------------------------------------------------------------
@@ -395,7 +408,8 @@ $('#productForm').addEventListener('submit', event => {
   if (!name || price < 0 || stock < 0 || minStock < 0 || ![price, stock, minStock].every(Number.isFinite)) return showToast('Revisá nombre, precio y stock', 'error');
   const duplicate = products.find(p => p.id !== id && p.name.toLowerCase() === name.toLowerCase() && p.brand.toLowerCase() === ($('#productBrand').value.trim() || 'Sin marca').toLowerCase() && presentation(p) === presentation({ content: number($('#productContent').value), unit: $('#productUnit').value }));
   if (duplicate && !confirm('Ya existe un producto con el mismo nombre, marca y presentación. ¿Guardar de todos modos?')) return;
-  const data = normalizeProduct({ id: id || uid(), name, brand: $('#productBrand').value.trim() || 'Sin marca', category: $('#productCategory').value.trim() || 'General', code: $('#productCode').value.trim(), price, stock, minStock, content: number($('#productContent').value), unit: $('#productUnit').value, expiration: $('#productExpiration').value, batches: id ? products.find(p => p.id === id)?.batches : [] });
+  const previous = id ? products.find(p => p.id === id) : {};
+  const data = normalizeProduct({ ...previous, id: id || uid(), name, brand: $('#productBrand').value.trim() || 'Sin marca', category: $('#productCategory').value.trim() || 'General', code: $('#productCode').value.trim(), price, precioVenta: price, stock, minStock, content: number($('#productContent').value), unit: $('#productUnit').value, expiration: $('#productExpiration').value, batches: previous?.batches || [] });
   if (id) Object.assign(products.find(p => p.id === id), data); else products.push(data);
   save(); renderAll(); $('#productDialog').close();
   showToast(id ? 'Producto actualizado' : 'Producto agregado');
@@ -427,17 +441,83 @@ $('#createFromPurchase').addEventListener('click', () => { $('#purchaseDialog').
 $('#purchaseForm').addEventListener('submit', event => {
   event.preventDefault();
   const product = products.find(p => p.id === $('#purchaseProduct').value), quantity = number($('#purchaseQuantity').value), unitCost = number($('#purchaseUnitCost').value);
-  if (!product || quantity <= 0 || !Number.isInteger(quantity) || unitCost < 0) return showToast('Revisá producto, cantidad y costo', 'error');
+  if (!product || quantity <= 0 || !Number.isInteger(quantity) || unitCost <= 0 || !Number.isFinite(quantity * unitCost)) return showToast('La cantidad y el costo deben ser mayores que cero', 'error');
   const expiration = $('#purchaseExpiration').value;
-  /* Una compra actualiza el producto existente y conserva el lote para trazabilidad. */
-  product.stock += quantity;
+  const stockAnterior = product.stock;
+  const costoAnterior = product.costoPromedio;
+  const stockFinal = stockAnterior + quantity;
+  // Si nunca hubo un costo, las existencias heredadas no inventan un valor:
+  // la primera compra establece el costo base para todo el stock resultante.
+  const nuevoCostoPromedio = costoAnterior > 0
+    ? ((stockAnterior * costoAnterior) + (quantity * unitCost)) / stockFinal
+    : unitCost;
+  if (!Number.isFinite(nuevoCostoPromedio) || stockFinal <= 0) return showToast('No se pudo calcular el costo promedio', 'error');
+  const precioVentaAnterior = product.precioVenta;
+  product.stock = stockFinal;
+  product.ultimoCostoCompra = unitCost;
+  product.costoPromedio = nuevoCostoPromedio;
+  product.fechaUltimaCompra = $('#purchaseDate').value;
   if (expiration) { product.batches.push({ id: uid(), quantity, expiration, purchaseDate: $('#purchaseDate').value }); if (!product.expiration || localDate(expiration) < localDate(product.expiration)) product.expiration = expiration; }
   product.brand = $('#purchaseBrand').value.trim() || product.brand;
   product.content = number($('#purchaseContent').value) || product.content;
   product.unit = $('#purchaseUnit').value;
-  purchases.unshift({ id: uid(), date: $('#purchaseDate').value, supplier: $('#supplierName').value.trim(), productId: product.id, productName: product.name, brand: product.brand, quantity, content: product.content, unit: product.unit, unitCost, totalCost: quantity * unitCost, expiration, notes: $('#purchaseNotes').value.trim() });
+  const purchaseId = uid();
+  purchases.unshift({ id: purchaseId, date: $('#purchaseDate').value, supplier: $('#supplierName').value.trim(), productId: product.id, productName: product.name, brand: product.brand, quantity, content: product.content, unit: product.unit, unitCost, totalCost: quantity * unitCost, expiration, notes: $('#purchaseNotes').value.trim(), stockAnterior, costoAnterior, nuevoCostoPromedio });
+  const historyEntry = { id: uid(), purchaseId, fecha: new Date().toISOString(), productoId: product.id, stockAnterior, cantidadComprada: quantity, costoAnterior, nuevoCostoCompra: unitCost, nuevoCostoPromedio, precioVentaAnterior, precioVentaNuevo: precioVentaAnterior, porcentajeAplicado: null, usuario: business?.user || 'Administrador', motivo: 'Compra registrada; precio pendiente de confirmación' };
+  costHistory.unshift(historyEntry);
   save(); renderAll(); $('#purchaseDialog').close();
-  showToast('Compra registrada y stock actualizado');
+  openPriceRecommendation(product, historyEntry);
+});
+
+let pendingRecommendation = null;
+function roundCommercial(value, mode = business?.rounding || 'none') {
+  if (!Number.isFinite(value)) return 0;
+  if (mode === 'none') return Math.round(value * 100) / 100;
+  const alwaysUp = mode.startsWith('up-');
+  const multiple = number(mode.replace('up-', '')) || 1;
+  return (alwaysUp ? Math.ceil(value / multiple) : Math.round(value / multiple)) * multiple;
+}
+function suggestedPrice(cost, percent) { return roundCommercial(cost * (1 + percent / 100)); }
+function openPriceRecommendation(product, historyEntry) {
+  pendingRecommendation = { product, historyEntry };
+  $('#recommendPercent').value = product.porcentajeRecargoPredeterminado;
+  $('#manualRecommendedPrice').value = '';
+  renderRecommendation();
+  $('#priceRecommendationDialog').showModal();
+}
+function renderRecommendation() {
+  if (!pendingRecommendation) return;
+  const { product: p, historyEntry: h } = pendingRecommendation;
+  const profit = p.precioVenta - p.costoPromedio;
+  const profitability = p.costoPromedio > 0 ? profit / p.costoPromedio * 100 : 0;
+  const percent = Math.max(0, number($('#recommendPercent').value));
+  $('#recommendSummary').innerHTML = [
+    ['Stock anterior', h.stockAnterior], ['Cantidad comprada', h.cantidadComprada], ['Stock final', p.stock],
+    ['Costo promedio anterior', money(h.costoAnterior)], ['Nuevo costo de compra', money(h.nuevoCostoCompra)],
+    ['Nuevo costo promedio', money(h.nuevoCostoPromedio)], ['Precio de venta actual', money(p.precioVenta)],
+    ['Ganancia / pérdida por unidad', money(profit)], ['Rentabilidad actual', `${profitability.toFixed(2)}%`]
+  ].map(([label,value]) => `<div><span>${label}</span><strong>${value}</strong></div>`).join('');
+  const warning = $('#profitWarning');
+  warning.hidden = !(profit < 0 || profitability < number(business.minimumMargin));
+  warning.className = `profit-warning ${profit < 0 ? 'danger' : 'warning'}`;
+  warning.textContent = profit < 0 ? `El precio de venta actual se encuentra por debajo del costo promedio. Este producto generaría una pérdida estimada de ${money(Math.abs(profit))} por unidad.` : `La rentabilidad actual es inferior al mínimo configurado (${business.minimumMargin}%).`;
+  $('#recommendedValue').textContent = money(suggestedPrice(p.costoPromedio, percent));
+  $('#quickRecommendations').innerHTML = [20,25,30,40,50].map(x => `<button type="button" data-quick-percent="${x}"><b>${x}%</b><span>${money(suggestedPrice(p.costoPromedio,x))}</span></button>`).join('');
+}
+$('#recommendPercent').addEventListener('input', renderRecommendation);
+$('#quickRecommendations').addEventListener('click', e => { const b=e.target.closest('[data-quick-percent]'); if(b){ $('#recommendPercent').value=b.dataset.quickPercent; renderRecommendation(); } });
+$('#priceRecommendationForm').addEventListener('submit', e => {
+  e.preventDefault(); if (!pendingRecommendation) return;
+  const action = e.submitter?.value || 'later', { product, historyEntry } = pendingRecommendation;
+  let next = product.precioVenta, percent = null;
+  if (action === 'recommended') { percent = Math.max(0, number($('#recommendPercent').value)); next = suggestedPrice(product.costoPromedio, percent); }
+  if (action === 'manual') { next = number($('#manualRecommendedPrice').value); if (next <= 0) return showToast('Ingresá un precio manual válido', 'error'); percent = product.costoPromedio ? (next / product.costoPromedio - 1) * 100 : null; }
+  product.price = product.precioVenta = next;
+  if (percent !== null) product.porcentajeRecargoPredeterminado = percent;
+  historyEntry.precioVentaNuevo = next; historyEntry.porcentajeAplicado = percent;
+  historyEntry.motivo = action === 'later' ? 'Precio pendiente de actualización' : action === 'keep' ? 'Se mantuvo el precio actual' : action === 'manual' ? 'Precio manual confirmado' : 'Precio recomendado confirmado';
+  save(); renderAll(); $('#priceRecommendationDialog').close(); pendingRecommendation = null;
+  showToast('Compra registrada; decisión de precio guardada');
 });
 
 /* ---------------------------------------------------------------------
@@ -456,7 +536,7 @@ $('#previewBulk').addEventListener('click', () => {
 $('#bulkForm').addEventListener('submit', event => {
   event.preventDefault();
   if (!bulkCandidates.length) return;
-  bulkCandidates.forEach(change => products.find(p => p.id === change.id).price = change.next);
+  bulkCandidates.forEach(change => { const p = products.find(p => p.id === change.id); p.price = p.precioVenta = change.next; });
   save(); renderAll(); $('#bulkDialog').close();
   showToast(`Se actualizaron ${bulkCandidates.length} precios`);
   bulkCandidates = [];
@@ -502,7 +582,7 @@ function toCsv(rows, headers) {
 function stamp() { return new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-'); }
 
 $('#exportBackup').addEventListener('click', () => {
-  const backup = { app: 'Tu Esquina', version: 2, exportedAt: new Date().toISOString(), products, purchases, sales, suppliers, cash: cashData, settings: business };
+  const backup = { app: 'Tu Esquina', version: 3, exportedAt: new Date().toISOString(), products, purchases, sales, costHistory, suppliers, cash: cashData, settings: business };
   downloadFile(`tu-esquina-backup-${stamp()}.json`, JSON.stringify(backup, null, 2), 'application/json');
   showToast('Copia de seguridad descargada');
 });
@@ -519,6 +599,7 @@ $('#importBackupFile').addEventListener('change', event => {
       products = data.products.map(normalizeProduct);
       purchases = data.purchases.map(normalizePurchase);
       sales = data.sales.map(normalizeSale);
+      costHistory = Array.isArray(data.costHistory) ? data.costHistory : [];
       if (Array.isArray(data.suppliers)) { localStorage.setItem('laEsquina.suppliers', JSON.stringify(data.suppliers)); }
       if (data.cash) { localStorage.setItem('laEsquina.cash', JSON.stringify(data.cash)); }
       if (data.settings) { localStorage.setItem('laEsquina.settings', JSON.stringify(data.settings)); }
@@ -549,7 +630,7 @@ $('#exportSalesCsv2').addEventListener('click', exportSalesCsv);
 $('#clearAllData').addEventListener('click', () => {
   if (!confirm('Se borrarán todos los productos, compras y ventas guardados en este navegador. Esta acción no se puede deshacer. ¿Continuar?')) return;
   products = structuredClone(seedProducts).map(normalizeProduct);
-  purchases = []; sales = []; cart = [];
+  purchases = []; sales = []; costHistory = []; cart = [];
   save(); renderAll(); $('#settingsDialog').close();
   showToast('Los datos se restablecieron');
 });
@@ -627,7 +708,7 @@ const loadObject = (key, fallback) => { try { return { ...fallback, ...(JSON.par
 let suppliers = load(BUSINESS_KEYS.suppliers, []);
 if (!suppliers.length && purchases.length) suppliers = [...new Set(purchases.map(p => p.supplier).filter(Boolean))].map(name => ({ id: uid(), name, company: '', phone: '', email: '', address: '', notes: 'Migrado automáticamente desde el historial de compras' }));
 let cashData = loadObject(BUSINESS_KEYS.cash, { open: false, opening: 0, openedAt: '', movements: [], sessions: [] });
-let business = loadObject(BUSINESS_KEYS.settings, { name: 'Tu Esquina', currency: 'ARS', color: '#551128', goal: 100000, taxes: 'included', vat: 21, user: 'Administrador' });
+let business = loadObject(BUSINESS_KEYS.settings, { name: 'Tu Esquina', currency: 'ARS', color: '#551128', goal: 100000, taxes: 'included', vat: 21, user: 'Administrador', minimumMargin: 20, rounding: '50' });
 const legacySave = save;
 save = function saveBusinessData() {
   legacySave();
@@ -638,7 +719,7 @@ save = function saveBusinessData() {
 
 function daySales(date = new Date()) { return sales.filter(s => new Date(s.date).toDateString() === date.toDateString()); }
 function unitsSold() { const result = {}; sales.forEach(s => s.items.forEach(i => result[i.id] = (result[i.id] || 0) + number(i.quantity))); return result; }
-function productCost(id) { return purchases.find(p => p.productId === id)?.unitCost || products.find(p => p.id === id)?.price * .65 || 0; }
+function productCost(id) { return products.find(p => p.id === id)?.costoPromedio || 0; }
 function estimatedProfit(list = sales) { return list.reduce((sum, s) => sum + s.items.reduce((n, i) => n + (i.price - productCost(i.id)) * i.quantity, 0), 0); }
 function applyBusinessTheme() {
   document.documentElement.style.setProperty('--brand', business.color);
@@ -688,13 +769,13 @@ function barsHtml(entries) { const max=Math.max(...entries.map(x=>x[1]),1); retu
 function drawChart(id, values, colors=['#551128','#d3a72c']) { const c=$(`#${id}`); if(!c)return; const ctx=c.getContext('2d'), w=c.clientWidth||500, h=220, d=devicePixelRatio||1; c.width=w*d;c.height=h*d;ctx.scale(d,d);ctx.clearRect(0,0,w,h);const max=Math.max(...values.flatMap(v=>v.values),1);values.forEach((set,si)=>set.values.forEach((v,i)=>{const bw=(w-48)/set.values.length/values.length,x=32+i*(w-48)/set.values.length+si*bw,y=h-28-(v/max)*(h-55);ctx.fillStyle=colors[si];ctx.beginPath();ctx.roundRect(x,y,bw-4,h-28-y,4);ctx.fill();})); }
 function renderReports() { const revenue=sales.reduce((a,s)=>a+s.total,0), units=Object.values(unitsSold()).reduce((a,n)=>a+n,0); $('#reportMetrics').innerHTML=metric('INGRESOS',money(revenue))+metric('VENTAS',sales.length)+metric('UNIDADES',units)+metric('GANANCIA EST.',money(estimatedProfit())); const payments={};sales.forEach(s=>payments[s.paymentMethod]=(payments[s.paymentMethod]||0)+s.total);$('#paymentReport').innerHTML=barsHtml(Object.entries(payments));const cats={};sales.forEach(s=>s.items.forEach(i=>{const p=products.find(x=>x.id===i.id);cats[p?.category||'General']=(cats[p?.category||'General']||0)+i.price*i.quantity;}));$('#categoryReport').innerHTML=barsHtml(Object.entries(cats));$('#stockReport').innerHTML=`<div class="stat-list"><div><span>Stock bajo</span><b>${products.filter(p=>p.stock<=p.minStock).length}</b></div><div><span>Sin stock</span><b>${products.filter(p=>!p.stock).length}</b></div><div><span>Vencidos</span><b>${products.filter(p=>expirationState(p)==='expired').length}</b></div><div><span>Próximos</span><b>${products.filter(p=>['urgent','soon'].includes(expirationState(p))).length}</b></div></div>`;const days=[...Array(7)].map((_,i)=>{const d=today();d.setDate(d.getDate()-6+i);return daySales(d).reduce((a,s)=>a+s.total,0)});requestAnimationFrame(()=>drawChart('reportChart',[{values:days}])); }
 function renderFinance() { const daily=daySales().reduce((a,s)=>a+s.total,0), now=new Date(), monthly=sales.filter(s=>{const d=new Date(s.date);return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear()});const monthTotal=monthly.reduce((a,s)=>a+s.total,0),cost=monthly.reduce((a,s)=>a+s.items.reduce((n,i)=>n+productCost(i.id)*i.quantity,0),0),profit=estimatedProfit(monthly);$('#financeMetrics').innerHTML=metric('VENTAS DEL DÍA',money(daily))+metric('VENTAS DEL MES',money(monthTotal))+metric('GANANCIA EST.',money(profit))+metric('COSTO MERCADERÍA',money(cost))+metric('MARGEN',`${monthTotal?Math.round(profit/monthTotal*100):0}%`);const sold=unitsSold(),rank=products.map(p=>[p.name,(p.price-productCost(p.id))*(sold[p.id]||0)]).sort((a,b)=>b[1]-a[1]);$('#profitableProducts').innerHTML=barsHtml(rank.slice(0,5));$('#unprofitableProducts').innerHTML=barsHtml(rank.slice(-5).reverse());requestAnimationFrame(()=>drawChart('financeChart',[{values:[monthTotal]},{values:[cost]}])); }
-function renderBusiness() { applyBusinessTheme(); renderSuppliers(); renderCash(); renderReports(); renderFinance(); $('#settingBusinessName').value=business.name;$('#settingCurrency').value=business.currency;$('#settingColor').value=business.color;$('#settingGoal').value=business.goal;$('#settingTaxes').value=business.taxes;$('#settingVat').value=business.vat; }
+function renderBusiness() { applyBusinessTheme(); renderSuppliers(); renderCash(); renderReports(); renderFinance(); $('#settingBusinessName').value=business.name;$('#settingCurrency').value=business.currency;$('#settingColor').value=business.color;$('#settingGoal').value=business.goal;$('#settingTaxes').value=business.taxes;$('#settingVat').value=business.vat;$('#settingMinimumMargin').value=business.minimumMargin;$('#settingRounding').value=business.rounding; }
 const baseRenderAll=renderAll; renderAll=function renderEverything(){baseRenderAll();renderBusiness();};
 
 $('#addSupplier').addEventListener('click',()=>{const name=prompt('Nombre del proveedor:');if(!name)return;suppliers.push({id:uid(),name,company:prompt('Empresa:')||'',phone:prompt('Teléfono:')||'',email:prompt('Email:')||'',address:prompt('Dirección:')||'',notes:prompt('Observaciones:')||''});save();renderSuppliers();showToast('Proveedor agregado');});
 document.addEventListener('click',e=>{const del=e.target.closest('[data-supplier-delete]');if(del&&confirm('¿Eliminar este proveedor?')){suppliers=suppliers.filter(s=>s.id!==del.dataset.supplierDelete);save();renderSuppliers();}const cash=e.target.closest('[data-cash-action]');if(cash) handleCash(cash.dataset.cashAction);});
 function handleCash(action){if(action==='open'||action==='toggle'&&!cashData.open){const opening=number(prompt('Caja inicial:',cashData.opening||0));cashData.open=true;cashData.opening=opening;cashData.openedAt=new Date().toISOString();showToast('Caja abierta');}else if(action==='close'||action==='toggle'){const total=number(cashData.opening)+daySales().reduce((a,s)=>a+s.total,0)+cashData.movements.reduce((a,m)=>a+m.amount,0);cashData.sessions.unshift({openedAt:cashData.openedAt,closedAt:new Date().toISOString(),opening:cashData.opening,total});cashData.open=false;showToast('Caja cerrada');}else if(action==='movement'){if(!cashData.open)return showToast('Primero debés abrir la caja','error');const amount=number(prompt('Monto (negativo para egreso):'));if(!amount)return;cashData.movements.unshift({id:uid(),date:new Date().toISOString(),amount,note:prompt('Concepto:')||'Movimiento manual'});}save();renderCash();renderDashboard();}
-$('#businessSettings').addEventListener('submit',e=>{e.preventDefault();business={...business,name:$('#settingBusinessName').value.trim(),currency:$('#settingCurrency').value,color:$('#settingColor').value,goal:number($('#settingGoal').value),taxes:$('#settingTaxes').value,vat:number($('#settingVat').value)};save();renderAll();showToast('Configuración guardada');});
+$('#businessSettings').addEventListener('submit',e=>{e.preventDefault();business={...business,name:$('#settingBusinessName').value.trim(),currency:$('#settingCurrency').value,color:$('#settingColor').value,goal:number($('#settingGoal').value),taxes:$('#settingTaxes').value,vat:number($('#settingVat').value),minimumMargin:Math.max(0,number($('#settingMinimumMargin').value)),rounding:$('#settingRounding').value};save();renderAll();showToast('Configuración guardada');});
 document.querySelector('.settings-actions').addEventListener('click',e=>{const a=e.target.closest('[data-settings-action]')?.dataset.settingsAction;if(a==='backup')$('#exportBackup').click();if(a==='restore')$('#importBackup').click();if(a==='inventory')$('#exportProductsCsv').click();if(a==='sales')exportSalesCsv();if(a==='clear')$('#clearAllData').click();});
 $('#topNewPurchase').addEventListener('click',()=>openPurchaseDialog());$('#topNewProduct').addEventListener('click',()=>openProductDialog());$('#topBackup').addEventListener('click',()=>$('#exportBackup').click());$('#globalSearch').addEventListener('focus',openCommandPalette);
 $('#notificationButton').addEventListener('click',()=>{const notices=[];products.filter(p=>!p.stock).forEach(p=>notices.push(`${p.name}: sin stock`));products.filter(p=>expirationState(p)==='expired').forEach(p=>notices.push(`${p.name}: vencido`));if(cashData.open)notices.push('La caja continúa abierta');alert(notices.length?notices.join('\n'):'No hay notificaciones pendientes.');});
