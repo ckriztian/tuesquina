@@ -20,6 +20,10 @@ Los productos, ventas y compras se almacenan en `localStorage` del navegador baj
 - Componentes rediseñados: tarjetas, tablas, filtros, diálogos y estados vacíos con un lenguaje visual más limpio y consistente.
 
 **Funcionalidades nuevas**
+- **Costo promedio ponderado**: cada compra combina el valor del stock anterior con el nuevo costo, sin usar ni modificar automáticamente el precio de venta.
+- **Recomendación de precio**: panel posterior a la compra con recargos rápidos, precio manual, advertencias de margen y redondeo comercial configurable.
+- **Migración de inventario**: los productos anteriores reciben de forma segura los campos separados `precioVenta`, `costoPromedio`, `ultimoCostoCompra`, `stockMinimo`, recargo y fecha de compra, conservando `price`/`minStock` por compatibilidad.
+- **Historial de costos y precios**: cada compra guarda su trazabilidad en `laEsquina.costHistory` y se incluye en las copias de seguridad.
 - **Paleta de comandos** (`Ctrl/Cmd + K` o `/`): buscá una sección o un producto y agregalo a la venta sin salir del teclado.
 - **Recibo imprimible**: cada venta puede verse e imprimirse como comprobante desde el historial o justo después de cobrar.
 - **Deshacer al eliminar**: borrar un producto muestra un aviso con la opción de restaurarlo durante unos segundos.
