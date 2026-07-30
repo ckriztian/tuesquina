@@ -26,11 +26,16 @@
       </a>
       <nav class="main-nav" aria-label="Navegación principal">
         <button class="nav-item active" data-view="dashboard"><span class="nav-icon">⌂</span><span>Inicio</span></button>
-        <button class="nav-item" data-view="pos"><span class="nav-icon">▦</span><span>Vender</span></button>
+        <button class="nav-item" data-view="pos"><span class="nav-icon">🛒</span><span>Punto de Venta</span></button>
         <button class="nav-item" data-view="inventory"><span class="nav-icon">□</span><span>Inventario</span></button>
-        <button class="nav-item" data-view="purchases"><span class="nav-icon">⇩</span><span>Compras</span></button>
+        <button class="nav-item" data-view="purchases"><span class="nav-icon">🚚</span><span>Compras</span></button>
+        <button class="nav-item" data-view="suppliers"><span class="nav-icon">👥</span><span>Proveedores</span></button>
+        <button class="nav-item" data-view="cash"><span class="nav-icon">💵</span><span>Caja</span></button>
+        <button class="nav-item" data-view="reports"><span class="nav-icon">📊</span><span>Reportes</span></button>
+        <button class="nav-item" data-view="finance"><span class="nav-icon">📈</span><span>Finanzas</span></button>
         <button class="nav-item" data-view="expirations"><span class="nav-icon">◷</span><span>Vencimientos</span></button>
         <button class="nav-item" data-view="sales"><span class="nav-icon">≡</span><span>Ventas</span></button>
+        <button class="nav-item" data-view="settings"><span class="nav-icon">⚙</span><span>Configuración</span></button>
       </nav>
       <div class="sidebar-footer">
         <div class="status-line"><span class="status-dot"></span><div><strong>Sistema activo</strong><small id="currentDate"></small></div></div>
@@ -43,18 +48,28 @@
     </aside>
 
     <main class="main-content">
+      <header class="topbar">
+        <label class="global-search"><span>⌕</span><input id="globalSearch" placeholder="Buscar productos o secciones…"><kbd>Ctrl K</kbd></label>
+        <div class="top-actions"><button class="top-action primary" data-view="pos">＋ Nueva venta</button><button class="top-action" id="topNewPurchase">＋ Compra</button><button class="top-action" id="topNewProduct">＋ Producto</button><span class="top-date" id="topDate"></span><strong id="topClock">--:--</strong><button class="user-chip">AD <span>Administrador</span></button><button class="icon-button" id="notificationButton" title="Notificaciones">🔔<i id="notificationCount"></i></button><button class="icon-button" data-view="settings" title="Configuración">⚙</button><button class="icon-button" id="topBackup" title="Backup">↧</button></div>
+      </header>
       <section class="view active" id="dashboard-view">
         <header class="page-header"><div><p class="eyebrow">RESUMEN DEL NEGOCIO</p><h1>Hola, Tu Esquina</h1><p class="subtitle">Todo lo importante de tu kiosco, en un solo lugar.</p></div><span class="clock" id="clock">--:--</span></header>
         <div class="metrics dashboard-metrics" id="dashboardMetrics"></div>
         <div class="dashboard-grid">
           <div>
-            <div class="panel"><div class="section-head"><div><p class="eyebrow">ACCESOS DIRECTOS</p><h2>¿Qué querés hacer?</h2></div></div><div class="quick-actions"><button data-view="pos">＋<strong>Nueva venta</strong><small>Cobrar productos</small></button><button data-view="purchases">⇩<strong>Registrar compra</strong><small>Ingresar mercadería</small></button><button id="dashboardAddProduct">□<strong>Nuevo producto</strong><small>Ampliar catálogo</small></button></div></div>
+            <div class="panel"><div class="section-head"><div><p class="eyebrow">ACCESOS RÁPIDOS</p><h2>Operaciones frecuentes</h2></div></div><div class="quick-actions expanded"><button data-view="pos">🛒<strong>Nueva venta</strong><small>Cobrar productos</small></button><button data-view="purchases">🚚<strong>Registrar compra</strong><small>Ingresar mercadería</small></button><button id="dashboardAddProduct">📦<strong>Nuevo producto</strong><small>Ampliar catálogo</small></button><button data-view="suppliers">👥<strong>Nuevo proveedor</strong><small>Administrar contactos</small></button><button data-view="reports">📊<strong>Ver reportes</strong><small>Analizar resultados</small></button><button data-cash-action="open">🔓<strong>Abrir caja</strong><small>Iniciar jornada</small></button><button data-cash-action="close">🔒<strong>Cerrar caja</strong><small>Finalizar jornada</small></button></div></div>
             <div class="panel chart-card"><div class="section-head"><div><p class="eyebrow">ÚLTIMOS 7 DÍAS</p><h2>Ventas por día</h2></div></div><div class="chart-wrap" id="salesChart"></div></div>
           </div>
           <div>
             <div class="panel"><div class="section-head"><div><p class="eyebrow">ATENCIÓN</p><h2>Alertas recientes</h2></div><button class="link-button" data-view="expirations">Ver vencimientos →</button></div><div id="dashboardAlerts"></div></div>
             <div class="panel" style="margin-top:16px"><div class="section-head"><div><p class="eyebrow">REPOSICIÓN</p><h2>Sugerencias de compra</h2></div><button class="link-button" data-view="purchases">Ir a compras →</button></div><div class="reorder-list" id="reorderList"></div></div>
           </div>
+        </div>
+        <div class="dashboard-lower">
+          <div class="panel"><div class="section-head"><div><p class="eyebrow">RANKING EN VIVO</p><h2>Productos más vendidos</h2></div></div><div class="table-wrap"><table><thead><tr><th>Producto</th><th>Vendidos</th><th>Precio</th><th>Stock</th><th></th></tr></thead><tbody id="topProductsTable"></tbody></table></div></div>
+          <div class="panel goal-card"><div><p class="eyebrow">OBJETIVO DIARIO</p><h2>Meta de ventas</h2></div><strong id="dailyGoalValue"></strong><div class="progress"><i id="dailyGoalProgress"></i></div><p id="dailyGoalLabel"></p></div>
+          <div class="panel"><div class="section-head"><div><p class="eyebrow">AGENDA</p><h2>Calendario</h2></div></div><div id="calendarList"></div></div>
+          <div class="panel movements-panel"><div class="section-head"><div><p class="eyebrow">TRAZABILIDAD</p><h2>Últimos movimientos</h2></div></div><div id="activityList"></div></div>
         </div>
       </section>
 
@@ -107,6 +122,16 @@
         <header class="page-header"><div><p class="eyebrow">MOVIMIENTOS</p><h1>Historial de ventas</h1></div><button class="secondary-button" id="exportSalesCsv">⇩ EXPORTAR CSV</button></header>
         <div class="metrics" id="salesMetrics"></div><div class="table-card"><div class="table-wrap"><table><thead><tr><th>Fecha y hora</th><th>Productos</th><th>Subtotal</th><th>Ajuste</th><th>Total</th><th>Pago</th><th></th></tr></thead><tbody id="salesTable"></tbody></table></div></div>
       </section>
+
+      <section class="view" id="suppliers-view"><header class="page-header"><div><p class="eyebrow">RED COMERCIAL</p><h1>Proveedores</h1><p class="subtitle">Contactos, productos habituales e historial de compras.</p></div><button class="primary-button compact" id="addSupplier">＋ NUEVO PROVEEDOR</button></header><div class="metrics" id="supplierMetrics"></div><div class="supplier-grid" id="supplierGrid"></div></section>
+
+      <section class="view" id="cash-view"><header class="page-header"><div><p class="eyebrow">CONTROL DE EFECTIVO</p><h1>Caja</h1><p class="subtitle">Aperturas, ingresos, egresos y cierres diarios.</p></div><div class="header-actions"><button class="secondary-button" data-cash-action="movement">＋ MOVIMIENTO</button><button class="primary-button compact" data-cash-action="toggle" id="cashToggle">ABRIR CAJA</button></div></header><div class="metrics dashboard-metrics" id="cashMetrics"></div><div class="dashboard-grid"><div class="panel"><div class="section-head"><div><p class="eyebrow">HOY</p><h2>Resumen de caja</h2></div><span class="badge" id="cashStatus"></span></div><div id="cashSummary"></div></div><div class="panel"><div class="section-head"><div><p class="eyebrow">HISTORIAL</p><h2>Movimientos diarios</h2></div></div><div id="cashHistory"></div></div></div></section>
+
+      <section class="view" id="reports-view"><header class="page-header"><div><p class="eyebrow">ESTADÍSTICAS</p><h1>Reportes</h1><p class="subtitle">Información accionable para decidir mejor.</p></div><div class="header-actions"><select id="reportPeriod"><option value="day">Hoy</option><option value="week">Esta semana</option><option value="month">Este mes</option></select><button class="secondary-button" id="reportExport">⇩ EXPORTAR CSV</button><button class="secondary-button" disabled title="Próximamente">PDF · PRÓXIMAMENTE</button></div></header><div class="metrics" id="reportMetrics"></div><div class="analytics-grid"><div class="panel chart-panel"><h2>Ventas en el tiempo</h2><canvas id="reportChart" height="220"></canvas></div><div class="panel"><h2>Métodos de pago</h2><div id="paymentReport"></div></div><div class="panel"><h2>Ventas por categoría</h2><div id="categoryReport"></div></div><div class="panel"><h2>Stock y vencimientos</h2><div id="stockReport"></div></div></div></section>
+
+      <section class="view" id="finance-view"><header class="page-header"><div><p class="eyebrow">RENTABILIDAD</p><h1>Finanzas</h1><p class="subtitle">Ingresos, costos, margen y desempeño por producto.</p></div></header><div class="metrics dashboard-metrics" id="financeMetrics"></div><div class="analytics-grid"><div class="panel chart-panel"><h2>Ingresos y costos</h2><canvas id="financeChart" height="220"></canvas></div><div class="panel"><h2>Productos más rentables</h2><div id="profitableProducts"></div></div><div class="panel"><h2>Productos menos rentables</h2><div id="unprofitableProducts"></div></div></div></section>
+
+      <section class="view" id="settings-view"><header class="page-header"><div><p class="eyebrow">ADMINISTRACIÓN</p><h1>Configuración</h1><p class="subtitle">Personalizá el negocio y protegé tu información.</p></div></header><form class="settings-page panel" id="businessSettings"><div class="settings-block"><h2>Datos del negocio</h2><div class="form-grid"><label>Nombre del negocio<input id="settingBusinessName" required></label><label>Moneda<select id="settingCurrency"><option value="ARS">Peso argentino (ARS)</option><option value="USD">Dólar (USD)</option><option value="UYU">Peso uruguayo (UYU)</option></select></label><label>Color principal<input id="settingColor" type="color"></label><label>Meta diaria<input id="settingGoal" type="number" min="0"></label><label>Impuestos<select id="settingTaxes"><option value="included">Incluidos en precios</option><option value="added">Agregar al cobrar</option></select></label><label>IVA (%)<input id="settingVat" type="number" min="0" max="100" step="0.01"></label></div><button class="primary-button compact">GUARDAR CAMBIOS</button></div><div class="settings-block"><h2>Datos y seguridad</h2><div class="settings-actions"><button type="button" class="secondary-button" data-settings-action="backup">Descargar backup</button><button type="button" class="secondary-button" data-settings-action="restore">Restaurar backup</button><button type="button" class="secondary-button" data-settings-action="inventory">Exportar inventario</button><button type="button" class="secondary-button" data-settings-action="sales">Exportar ventas</button><button type="button" class="primary-button danger compact" data-settings-action="clear">Vaciar base de datos</button></div></div></form></section>
     </main>
   </div>
 
