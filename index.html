@@ -3,54 +3,50 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#f4f4ee">
-  <title>La Esquina — Kiosco</title>
+  <meta name="theme-color" content="#123f35">
+  <title>Tu Esquina — Gestión de kiosco</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <div class="app-shell">
     <aside class="sidebar">
-      <a class="brand" href="#" aria-label="Inicio La Esquina">
-        <span class="brand-mark">LE</span>
-        <span>LA<br>ESQUINA</span>
-      </a>
-
+      <a class="brand" href="#" data-view="dashboard" aria-label="Inicio Tu Esquina"><span class="brand-mark">TE</span><span>TU<br>ESQUINA</span></a>
       <nav class="main-nav" aria-label="Navegación principal">
-        <button class="nav-item active" data-view="pos"><span class="nav-icon">▦</span><span>Vender</span></button>
+        <button class="nav-item active" data-view="dashboard"><span class="nav-icon">⌂</span><span>Inicio</span></button>
+        <button class="nav-item" data-view="pos"><span class="nav-icon">▦</span><span>Vender</span></button>
         <button class="nav-item" data-view="inventory"><span class="nav-icon">□</span><span>Inventario</span></button>
         <button class="nav-item" data-view="purchases"><span class="nav-icon">⇩</span><span>Compras</span></button>
+        <button class="nav-item" data-view="expirations"><span class="nav-icon">◷</span><span>Vencimientos</span></button>
+        <button class="nav-item" data-view="sales"><span class="nav-icon">≡</span><span>Ventas</span></button>
       </nav>
-
-      <div class="sidebar-footer">
-        <span class="status-dot"></span>
-        <div><strong>Sistema activo</strong><small id="currentDate"></small></div>
-      </div>
+      <div class="sidebar-footer"><span class="status-dot"></span><div><strong>Sistema activo</strong><small id="currentDate"></small></div></div>
     </aside>
 
     <main class="main-content">
-      <section class="view active" id="pos-view">
-        <header class="page-header">
-          <div><p class="eyebrow">PUNTO DE VENTA</p><h1>Nueva venta</h1></div>
-          <div class="header-actions"><span class="clock" id="clock">--:--</span><button class="round-button" id="clearSale" title="Vaciar venta" aria-label="Vaciar venta">↻</button></div>
-        </header>
+      <section class="view active" id="dashboard-view">
+        <header class="page-header"><div><p class="eyebrow">RESUMEN DEL NEGOCIO</p><h1>Hola, Tu Esquina</h1><p class="subtitle">Todo lo importante de tu kiosco, en un solo lugar.</p></div><span class="clock" id="clock">--:--</span></header>
+        <div class="metrics dashboard-metrics" id="dashboardMetrics"></div>
+        <div class="dashboard-grid"><div class="panel"><div class="section-head"><div><p class="eyebrow">ACCESOS DIRECTOS</p><h2>¿Qué querés hacer?</h2></div></div><div class="quick-actions"><button data-view="pos">＋<strong>Nueva venta</strong><small>Cobrar productos</small></button><button data-view="purchases">⇩<strong>Registrar compra</strong><small>Ingresar mercadería</small></button><button id="dashboardAddProduct">□<strong>Nuevo producto</strong><small>Ampliar catálogo</small></button></div></div><div class="panel"><div class="section-head"><div><p class="eyebrow">ATENCIÓN</p><h2>Alertas recientes</h2></div><button class="link-button" data-view="expirations">Ver vencimientos →</button></div><div id="dashboardAlerts"></div></div></div>
+      </section>
 
+      <section class="view" id="pos-view">
+        <header class="page-header"><div><p class="eyebrow">PUNTO DE VENTA</p><h1>Nueva venta</h1></div><button class="round-button" id="clearSale" title="Vaciar venta">↻</button></header>
         <div class="pos-layout">
           <div class="catalog-panel">
-            <label class="search-box"><span>⌕</span><input id="productSearch" type="search" placeholder="Buscar producto..." autocomplete="off"></label>
-            <div class="filter-row" id="stockFilters">
-              <button class="filter active" data-filter="all">Todos</button>
-              <button class="filter" data-filter="available">Disponibles</button>
-              <button class="filter" data-filter="low">Stock bajo</button>
-            </div>
+            <div class="panel quick-sale"><div class="section-head"><div><p class="eyebrow">UN TOQUE</p><h2>Venta rápida</h2></div><small>Los más vendidos</small></div><div class="quick-grid" id="quickSaleGrid"></div></div>
+            <label class="search-box"><span>⌕</span><input id="productSearch" type="search" placeholder="Buscar por producto o marca…" autocomplete="off"></label>
+            <div class="filter-row" id="stockFilters"><button class="filter active" data-filter="all">Todos</button><button class="filter" data-filter="available">Disponibles</button><button class="filter" data-filter="low">Stock bajo</button></div>
             <div class="product-grid" id="productGrid"></div>
           </div>
-
           <aside class="cart-panel">
             <div class="cart-title"><div><p class="eyebrow">VENTA ACTUAL</p><h2>Detalle</h2></div><span class="item-count" id="cartCount">0 ITEMS</span></div>
             <div class="cart-items" id="cartItems"></div>
             <div class="cart-summary">
-              <div><span>Subtotal</span><strong id="subtotal">$0,00</strong></div>
-              <div class="total-row"><span>Total</span><strong id="total">$0,00</strong></div>
+              <div><span>Subtotal</span><strong id="subtotal">$ 0,00</strong></div>
+              <div class="adjustment"><label>Ajuste<select id="adjustmentType"><option value="none">Sin modificación</option><option value="discount">Bonificación</option><option value="surcharge">Recargo</option></select></label><label>Porcentaje<input id="adjustmentPercent" type="number" min="0" max="100" step="0.01" value="0"></label></div>
+              <div><span id="adjustmentLabel">Ajuste (0%)</span><strong id="adjustmentAmount">$ 0,00</strong></div>
+              <div class="total-row"><span>Total final</span><strong id="total">$ 0,00</strong></div>
+              <label class="payment-label">Método de pago<select id="paymentMethod" required><option value="">Seleccionar…</option><option>Efectivo</option><option>Tarjeta de débito</option><option>Tarjeta de crédito</option><option>QR</option><option>Transferencia</option></select></label>
               <button class="primary-button" id="completeSale">COBRAR <span>→</span></button>
             </div>
           </aside>
@@ -58,53 +54,34 @@
       </section>
 
       <section class="view" id="inventory-view">
-        <header class="page-header">
-          <div><p class="eyebrow">CONTROL DE EXISTENCIAS</p><h1>Inventario</h1></div>
-          <button class="primary-button compact" id="addProduct">＋ NUEVO PRODUCTO</button>
-        </header>
+        <header class="page-header"><div><p class="eyebrow">CONTROL DE EXISTENCIAS</p><h1>Inventario</h1></div><div class="header-actions"><button class="secondary-button" id="bulkPrices">% PRECIOS</button><button class="primary-button compact" id="addProduct">＋ NUEVO PRODUCTO</button></div></header>
         <div class="metrics" id="inventoryMetrics"></div>
-        <div class="table-card">
-          <div class="table-toolbar"><label class="search-box"><span>⌕</span><input id="inventorySearch" type="search" placeholder="Buscar en inventario..."></label><span id="inventoryCount"></span></div>
-          <div class="table-wrap"><table><thead><tr><th>Producto</th><th>Precio</th><th>Stock</th><th>Valor</th><th></th></tr></thead><tbody id="inventoryTable"></tbody></table></div>
-        </div>
+        <div class="table-card"><div class="table-toolbar inventory-toolbar"><label class="search-box"><span>⌕</span><input id="inventorySearch" type="search" placeholder="Nombre o marca…"></label><select id="inventoryCategory"><option value="all">Todas las categorías</option></select><select id="inventoryStatus"><option value="all">Todos los estados</option><option value="low">Stock bajo</option><option value="empty">Sin stock</option><option value="soon">Próximos a vencer</option><option value="expired">Vencidos</option></select><span id="inventoryCount"></span></div><div class="table-wrap"><table><thead><tr><th>Producto</th><th>Categoría</th><th>Precio</th><th>Stock</th><th>Vencimiento</th><th></th></tr></thead><tbody id="inventoryTable"></tbody></table></div></div>
       </section>
 
       <section class="view" id="purchases-view">
-        <header class="page-header">
-          <div><p class="eyebrow">ABASTECIMIENTO</p><h1>Compras a proveedor</h1></div>
-          <button class="primary-button compact" id="newPurchase">＋ REGISTRAR COMPRA</button>
-        </header>
-        <div class="metrics" id="purchaseMetrics"></div>
-        <div class="table-card">
-          <div class="table-toolbar"><div><p class="eyebrow">HISTORIAL</p><h2>Últimas compras</h2></div></div>
-          <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Proveedor</th><th>Producto</th><th>Cantidad</th><th>Costo total</th></tr></thead><tbody id="purchasesTable"></tbody></table></div>
-        </div>
+        <header class="page-header"><div><p class="eyebrow">ABASTECIMIENTO</p><h1>Compras a proveedor</h1></div><button class="primary-button compact" id="newPurchase">＋ REGISTRAR COMPRA</button></header>
+        <div class="metrics" id="purchaseMetrics"></div><div class="table-card"><div class="table-toolbar"><div><p class="eyebrow">HISTORIAL</p><h2>Últimas compras</h2></div></div><div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Proveedor</th><th>Producto</th><th>Lote</th><th>Cantidad</th><th>Costo</th></tr></thead><tbody id="purchasesTable"></tbody></table></div></div>
+      </section>
+
+      <section class="view" id="expirations-view">
+        <header class="page-header"><div><p class="eyebrow">CONTROL DE LOTES</p><h1>Vencimientos</h1><p class="subtitle">Priorizá los productos que necesitan atención.</p></div></header>
+        <div class="filter-row" id="expirationFilters"><button class="filter active" data-expiration="all">Todos</button><button class="filter danger" data-expiration="expired">Vencidos</button><button class="filter" data-expiration="7">Próximos 7 días</button><button class="filter" data-expiration="15">15 días</button><button class="filter" data-expiration="30">30 días</button><button class="filter" data-expiration="none">Sin fecha</button></div>
+        <div class="expiration-grid" id="expirationGrid"></div>
+      </section>
+
+      <section class="view" id="sales-view">
+        <header class="page-header"><div><p class="eyebrow">MOVIMIENTOS</p><h1>Historial de ventas</h1></div></header>
+        <div class="metrics" id="salesMetrics"></div><div class="table-card"><div class="table-wrap"><table><thead><tr><th>Fecha y hora</th><th>Productos</th><th>Subtotal</th><th>Ajuste</th><th>Total</th><th>Pago</th></tr></thead><tbody id="salesTable"></tbody></table></div></div>
       </section>
     </main>
   </div>
 
-  <dialog id="productDialog">
-    <form method="dialog" id="productForm">
-      <div class="dialog-head"><div><p class="eyebrow">CATÁLOGO</p><h2 id="productDialogTitle">Nuevo producto</h2></div><button type="button" class="close-button" data-close="productDialog">×</button></div>
-      <input type="hidden" id="productId">
-      <label>Nombre del producto<input id="productName" required maxlength="50" placeholder="Ej. Yerba mate"></label>
-      <div class="form-row"><label>Precio de venta<input id="productPrice" required type="number" min="0.01" step="0.01" placeholder="0,00"></label><label>Stock inicial<input id="productStock" required type="number" min="0" step="1" placeholder="0"></label></div>
-      <div class="dialog-actions"><button type="button" class="secondary-button" data-close="productDialog">Cancelar</button><button class="primary-button compact" value="default">GUARDAR PRODUCTO</button></div>
-    </form>
-  </dialog>
+  <dialog id="productDialog"><form id="productForm"><div class="dialog-head"><div><p class="eyebrow">CATÁLOGO</p><h2 id="productDialogTitle">Nuevo producto</h2></div><button type="button" class="close-button" data-close="productDialog">×</button></div><input type="hidden" id="productId"><div class="form-grid"><label class="wide">Nombre *<input id="productName" required maxlength="70" placeholder="Ej. Agua mineral"></label><label>Marca<input id="productBrand" maxlength="50" placeholder="Ej. Villavicencio"></label><label>Categoría<input id="productCategory" maxlength="40" placeholder="Ej. Bebidas"></label><label>Código<input id="productCode" maxlength="40" placeholder="Código interno o de barras"></label><label>Precio de venta *<input id="productPrice" required type="number" min="0" step="0.01"></label><label>Stock actual *<input id="productStock" required type="number" min="0" step="1"></label><label>Stock mínimo *<input id="productMinStock" required type="number" min="0" step="1"></label><label>Contenido<input id="productContent" type="number" min="0" step="0.01" placeholder="Ej. 500"></label><label>Unidad de medida<select id="productUnit"><option>Unidad</option><option>Gramos</option><option>Kilogramos</option><option>Mililitros</option><option>Litros</option></select></label><label>Fecha de vencimiento<input id="productExpiration" type="date"></label></div><div class="dialog-actions"><button type="button" class="secondary-button" data-close="productDialog">Cancelar</button><button class="primary-button compact">GUARDAR PRODUCTO</button></div></form></dialog>
 
-  <dialog id="purchaseDialog">
-    <form method="dialog" id="purchaseForm">
-      <div class="dialog-head"><div><p class="eyebrow">NUEVO INGRESO</p><h2>Registrar compra</h2></div><button type="button" class="close-button" data-close="purchaseDialog">×</button></div>
-      <label>Proveedor<input id="supplierName" required maxlength="50" placeholder="Nombre del proveedor"></label>
-      <label>Producto<select id="purchaseProduct" required></select></label>
-      <div class="form-row"><label>Cantidad recibida<input id="purchaseQuantity" required type="number" min="1" step="1" placeholder="0"></label><label>Costo total<input id="purchaseCost" required type="number" min="0" step="0.01" placeholder="0,00"></label></div>
-      <p class="form-note">Al guardar, la cantidad se sumará automáticamente al inventario.</p>
-      <div class="dialog-actions"><button type="button" class="secondary-button" data-close="purchaseDialog">Cancelar</button><button class="primary-button compact" value="default">REGISTRAR COMPRA</button></div>
-    </form>
-  </dialog>
+  <dialog id="purchaseDialog"><form id="purchaseForm"><div class="dialog-head"><div><p class="eyebrow">NUEVO INGRESO</p><h2>Compra a proveedor</h2></div><button type="button" class="close-button" data-close="purchaseDialog">×</button></div><div class="form-grid"><label>Proveedor *<input id="supplierName" required maxlength="60"></label><label>Producto *<select id="purchaseProduct" required></select></label><button type="button" class="link-button form-link" id="createFromPurchase">¿No existe? Crear producto</button><label>Marca<input id="purchaseBrand" readonly></label><label>Cantidad comprada *<input id="purchaseQuantity" required type="number" min="1" step="1"></label><label>Contenido / presentación<input id="purchaseContent" type="number" min="0" step="0.01"></label><label>Unidad<select id="purchaseUnit"><option>Unidad</option><option>Gramos</option><option>Kilogramos</option><option>Mililitros</option><option>Litros</option></select></label><label>Costo unitario *<input id="purchaseUnitCost" required type="number" min="0" step="0.01"></label><label>Costo total<input id="purchaseTotalCost" readonly type="number"></label><label>Fecha de compra *<input id="purchaseDate" required type="date"></label><label>Vencimiento del lote<input id="purchaseExpiration" type="date"></label><label class="wide">Observaciones<textarea id="purchaseNotes" rows="3" maxlength="300"></textarea></label></div><p class="form-note">Al confirmar, el stock se incrementa y el vencimiento del lote queda registrado.</p><div class="dialog-actions"><button type="button" class="secondary-button" data-close="purchaseDialog">Cancelar</button><button class="primary-button compact">REGISTRAR COMPRA</button></div></form></dialog>
 
-  <div class="toast" id="toast" role="status"></div>
+  <dialog id="bulkDialog"><form id="bulkForm"><div class="dialog-head"><div><p class="eyebrow">HERRAMIENTA</p><h2>Actualización masiva de precios</h2></div><button type="button" class="close-button" data-close="bulkDialog">×</button></div><div class="form-row"><label>Operación<select id="bulkOperation"><option value="increase">Aumentar</option><option value="decrease">Disminuir</option></select></label><label>Porcentaje<input id="bulkPercent" required type="number" min="0.01" max="100" step="0.01"></label></div><label>Aplicar a<select id="bulkCategory"><option value="all">Todos los productos</option></select></label><button type="button" class="secondary-button full" id="previewBulk">VISTA PREVIA</button><div class="preview-table" id="bulkPreview"><p class="form-note">Completá los datos para ver los nuevos precios. Nada cambiará hasta confirmar.</p></div><div class="dialog-actions"><button type="button" class="secondary-button" data-close="bulkDialog">Cancelar</button><button class="primary-button compact" id="confirmBulk" disabled>CONFIRMAR CAMBIOS</button></div></form></dialog>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <script src="app.js"></script>
-</body>
-</html>
+</body></html>
