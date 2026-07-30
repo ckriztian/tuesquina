@@ -3,14 +3,27 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#123f35">
+  <meta name="theme-color" content="#1e5641">
   <title>Tu Esquina — Gestión de kiosco</title>
   <link rel="stylesheet" href="styles.css">
+  <script>
+    // Aplica el tema guardado antes de pintar la página, para evitar parpadeos.
+    (function () {
+      try {
+        var saved = localStorage.getItem('laEsquina.theme') || 'system';
+        var isDark = saved === 'dark' || (saved === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        if (isDark) document.documentElement.setAttribute('data-theme', 'dark');
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body>
   <div class="app-shell">
     <aside class="sidebar">
-      <a class="brand" href="#" data-view="dashboard" aria-label="Inicio Tu Esquina"><span class="brand-mark">TE</span><span>TU<br>ESQUINA</span></a>
+      <a class="brand" href="#" data-view="dashboard" aria-label="Inicio Tu Esquina">
+        <span class="brand-mark">TE</span>
+        <span class="brand-name">Tu Esquina<small>GESTIÓN DE KIOSCO</small></span>
+      </a>
       <nav class="main-nav" aria-label="Navegación principal">
         <button class="nav-item active" data-view="dashboard"><span class="nav-icon">⌂</span><span>Inicio</span></button>
         <button class="nav-item" data-view="pos"><span class="nav-icon">▦</span><span>Vender</span></button>
@@ -19,14 +32,30 @@
         <button class="nav-item" data-view="expirations"><span class="nav-icon">◷</span><span>Vencimientos</span></button>
         <button class="nav-item" data-view="sales"><span class="nav-icon">≡</span><span>Ventas</span></button>
       </nav>
-      <div class="sidebar-footer"><span class="status-dot"></span><div><strong>Sistema activo</strong><small id="currentDate"></small></div></div>
+      <div class="sidebar-footer">
+        <div class="status-line"><span class="status-dot"></span><div><strong>Sistema activo</strong><small id="currentDate"></small></div></div>
+        <div class="footer-actions">
+          <button class="icon-button" id="themeToggle" title="Cambiar tema">◐</button>
+          <button class="icon-button" id="openSettings" title="Ajustes y copias de seguridad">⚙</button>
+          <button class="icon-button" id="openCommand" title="Buscar (Ctrl/Cmd + K)">⌕</button>
+        </div>
+      </div>
     </aside>
 
     <main class="main-content">
       <section class="view active" id="dashboard-view">
         <header class="page-header"><div><p class="eyebrow">RESUMEN DEL NEGOCIO</p><h1>Hola, Tu Esquina</h1><p class="subtitle">Todo lo importante de tu kiosco, en un solo lugar.</p></div><span class="clock" id="clock">--:--</span></header>
         <div class="metrics dashboard-metrics" id="dashboardMetrics"></div>
-        <div class="dashboard-grid"><div class="panel"><div class="section-head"><div><p class="eyebrow">ACCESOS DIRECTOS</p><h2>¿Qué querés hacer?</h2></div></div><div class="quick-actions"><button data-view="pos">＋<strong>Nueva venta</strong><small>Cobrar productos</small></button><button data-view="purchases">⇩<strong>Registrar compra</strong><small>Ingresar mercadería</small></button><button id="dashboardAddProduct">□<strong>Nuevo producto</strong><small>Ampliar catálogo</small></button></div></div><div class="panel"><div class="section-head"><div><p class="eyebrow">ATENCIÓN</p><h2>Alertas recientes</h2></div><button class="link-button" data-view="expirations">Ver vencimientos →</button></div><div id="dashboardAlerts"></div></div></div>
+        <div class="dashboard-grid">
+          <div>
+            <div class="panel"><div class="section-head"><div><p class="eyebrow">ACCESOS DIRECTOS</p><h2>¿Qué querés hacer?</h2></div></div><div class="quick-actions"><button data-view="pos">＋<strong>Nueva venta</strong><small>Cobrar productos</small></button><button data-view="purchases">⇩<strong>Registrar compra</strong><small>Ingresar mercadería</small></button><button id="dashboardAddProduct">□<strong>Nuevo producto</strong><small>Ampliar catálogo</small></button></div></div>
+            <div class="panel chart-card"><div class="section-head"><div><p class="eyebrow">ÚLTIMOS 7 DÍAS</p><h2>Ventas por día</h2></div></div><div class="chart-wrap" id="salesChart"></div></div>
+          </div>
+          <div>
+            <div class="panel"><div class="section-head"><div><p class="eyebrow">ATENCIÓN</p><h2>Alertas recientes</h2></div><button class="link-button" data-view="expirations">Ver vencimientos →</button></div><div id="dashboardAlerts"></div></div>
+            <div class="panel" style="margin-top:16px"><div class="section-head"><div><p class="eyebrow">REPOSICIÓN</p><h2>Sugerencias de compra</h2></div><button class="link-button" data-view="purchases">Ir a compras →</button></div><div class="reorder-list" id="reorderList"></div></div>
+          </div>
+        </div>
       </section>
 
       <section class="view" id="pos-view">
@@ -34,7 +63,7 @@
         <div class="pos-layout">
           <div class="catalog-panel">
             <div class="panel quick-sale"><div class="section-head"><div><p class="eyebrow">UN TOQUE</p><h2>Venta rápida</h2></div><small>Los más vendidos</small></div><div class="quick-grid" id="quickSaleGrid"></div></div>
-            <label class="search-box"><span>⌕</span><input id="productSearch" type="search" placeholder="Buscar por producto o marca…" autocomplete="off"></label>
+            <label class="search-box"><span>⌕</span><input id="productSearch" type="search" placeholder="Buscar por producto o marca…" autocomplete="off"><span class="kbd-hint">Ctrl K</span></label>
             <div class="filter-row" id="stockFilters"><button class="filter active" data-filter="all">Todos</button><button class="filter" data-filter="available">Disponibles</button><button class="filter" data-filter="low">Stock bajo</button></div>
             <div class="product-grid" id="productGrid"></div>
           </div>
@@ -42,10 +71,14 @@
             <div class="cart-title"><div><p class="eyebrow">VENTA ACTUAL</p><h2>Detalle</h2></div><span class="item-count" id="cartCount">0 ITEMS</span></div>
             <div class="cart-items" id="cartItems"></div>
             <div class="cart-summary">
-              <div><span>Subtotal</span><strong id="subtotal">$ 0,00</strong></div>
-              <div class="adjustment"><label>Ajuste<select id="adjustmentType"><option value="none">Sin modificación</option><option value="discount">Bonificación</option><option value="surcharge">Recargo</option></select></label><label>Porcentaje<input id="adjustmentPercent" type="number" min="0" max="100" step="0.01" value="0"></label></div>
-              <div><span id="adjustmentLabel">Ajuste (0%)</span><strong id="adjustmentAmount">$ 0,00</strong></div>
-              <div class="total-row"><span>Total final</span><strong id="total">$ 0,00</strong></div>
+              <div><span>Subtotal</span><strong class="num" id="subtotal">$ 0,00</strong></div>
+              <div class="adjustment" id="adjustmentRow"><label>Ajuste<select id="adjustmentType"><option value="none">Sin modificación</option><option value="discount">Bonificación</option><option value="surcharge">Recargo</option></select></label><label>Porcentaje<input id="adjustmentPercent" type="number" min="0" max="100" step="0.01" value="0"></label></div>
+              <p class="adjustment-note" id="adjustmentNote">Este medio de pago requiere aplicar una bonificación o un recargo.</p>
+              <div><span id="adjustmentLabel">Ajuste (0%)</span><strong class="num" id="adjustmentAmount">$ 0,00</strong></div>
+              <label class="shipping-toggle"><input type="checkbox" id="shippingEnabled"><span>Agregar envío</span></label>
+              <div class="shipping-amount-row" id="shippingAmountRow" hidden><label>Monto de envío<input id="shippingAmount" type="number" min="0" step="0.01" value="0"></label></div>
+              <div id="shippingSummaryRow" hidden><span>Envío</span><strong class="num" id="shippingDisplay">$ 0,00</strong></div>
+              <div class="total-row"><span>Total final</span><strong class="num" id="total">$ 0,00</strong></div>
               <label class="payment-label">Método de pago<select id="paymentMethod" required><option value="">Seleccionar…</option><option>Efectivo</option><option>Tarjeta de débito</option><option>Tarjeta de crédito</option><option>QR</option><option>Transferencia</option></select></label>
               <button class="primary-button" id="completeSale">COBRAR <span>→</span></button>
             </div>
@@ -71,17 +104,72 @@
       </section>
 
       <section class="view" id="sales-view">
-        <header class="page-header"><div><p class="eyebrow">MOVIMIENTOS</p><h1>Historial de ventas</h1></div></header>
-        <div class="metrics" id="salesMetrics"></div><div class="table-card"><div class="table-wrap"><table><thead><tr><th>Fecha y hora</th><th>Productos</th><th>Subtotal</th><th>Ajuste</th><th>Total</th><th>Pago</th></tr></thead><tbody id="salesTable"></tbody></table></div></div>
+        <header class="page-header"><div><p class="eyebrow">MOVIMIENTOS</p><h1>Historial de ventas</h1></div><button class="secondary-button" id="exportSalesCsv">⇩ EXPORTAR CSV</button></header>
+        <div class="metrics" id="salesMetrics"></div><div class="table-card"><div class="table-wrap"><table><thead><tr><th>Fecha y hora</th><th>Productos</th><th>Subtotal</th><th>Ajuste</th><th>Total</th><th>Pago</th><th></th></tr></thead><tbody id="salesTable"></tbody></table></div></div>
       </section>
     </main>
   </div>
 
-  <dialog id="productDialog"><form id="productForm"><div class="dialog-head"><div><p class="eyebrow">CATÁLOGO</p><h2 id="productDialogTitle">Nuevo producto</h2></div><button type="button" class="close-button" data-close="productDialog">×</button></div><input type="hidden" id="productId"><div class="form-grid"><label class="wide">Nombre *<input id="productName" required maxlength="70" placeholder="Ej. Agua mineral"></label><label>Marca<input id="productBrand" maxlength="50" placeholder="Ej. Villavicencio"></label><label>Categoría<input id="productCategory" maxlength="40" placeholder="Ej. Bebidas"></label><label>Código<input id="productCode" maxlength="40" placeholder="Código interno o de barras"></label><label>Precio de venta *<input id="productPrice" required type="number" min="0" step="0.01"></label><label>Stock actual *<input id="productStock" required type="number" min="0" step="1"></label><label>Stock mínimo *<input id="productMinStock" required type="number" min="0" step="1"></label><label>Contenido<input id="productContent" type="number" min="0" step="0.01" placeholder="Ej. 500"></label><label>Unidad de medida<select id="productUnit"><option>Unidad</option><option>Gramos</option><option>Kilogramos</option><option>Mililitros</option><option>Litros</option></select></label><label>Fecha de vencimiento<input id="productExpiration" type="date"></label></div><div class="dialog-actions"><button type="button" class="secondary-button" data-close="productDialog">Cancelar</button><button class="primary-button compact">GUARDAR PRODUCTO</button></div></form></dialog>
+  <dialog id="productDialog"><form id="productForm"><div class="dialog-head"><div><p class="eyebrow">CATÁLOGO</p><h2 id="productDialogTitle">Nuevo producto</h2></div><button type="button" class="close-button" data-close="productDialog">×</button></div><input type="hidden" id="productId"><div class="form-grid"><label class="wide">Nombre *<input id="productName" required maxlength="70" placeholder="Ej. Agua mineral"></label><label>Marca<input id="productBrand" maxlength="50" placeholder="Ej. Villavicencio"></label><label>Categoría *<select id="productCategory" required><option value="">Seleccionar…</option><option>Almacén</option><option>Bebidas</option><option>Alcohol</option><option>Golosinas</option><option>Snacks</option><option>Natura</option></select></label><label>Código<input id="productCode" maxlength="40" placeholder="Código interno o de barras"></label><label>Precio de venta *<input id="productPrice" required type="number" min="0" step="0.01"></label><label>Stock actual *<input id="productStock" required type="number" min="0" step="1"></label><label>Stock mínimo *<input id="productMinStock" required type="number" min="0" step="1"></label><label>Contenido<input id="productContent" type="number" min="0" step="0.01" placeholder="Ej. 500"></label><label>Unidad de medida<select id="productUnit"><option>Unidad</option><option>Gramos</option><option>Kilogramos</option><option>Mililitros</option><option>Litros</option></select></label><label>Fecha de vencimiento<input id="productExpiration" type="date"></label></div><div class="dialog-actions"><button type="button" class="secondary-button" data-close="productDialog">Cancelar</button><button class="primary-button compact">GUARDAR PRODUCTO</button></div></form></dialog>
 
   <dialog id="purchaseDialog"><form id="purchaseForm"><div class="dialog-head"><div><p class="eyebrow">NUEVO INGRESO</p><h2>Compra a proveedor</h2></div><button type="button" class="close-button" data-close="purchaseDialog">×</button></div><div class="form-grid"><label>Proveedor *<input id="supplierName" required maxlength="60"></label><label>Producto *<select id="purchaseProduct" required></select></label><button type="button" class="link-button form-link" id="createFromPurchase">¿No existe? Crear producto</button><label>Marca<input id="purchaseBrand" readonly></label><label>Cantidad comprada *<input id="purchaseQuantity" required type="number" min="1" step="1"></label><label>Contenido / presentación<input id="purchaseContent" type="number" min="0" step="0.01"></label><label>Unidad<select id="purchaseUnit"><option>Unidad</option><option>Gramos</option><option>Kilogramos</option><option>Mililitros</option><option>Litros</option></select></label><label>Costo unitario *<input id="purchaseUnitCost" required type="number" min="0" step="0.01"></label><label>Costo total<input id="purchaseTotalCost" readonly type="number"></label><label>Fecha de compra *<input id="purchaseDate" required type="date"></label><label>Vencimiento del lote<input id="purchaseExpiration" type="date"></label><label class="wide">Observaciones<textarea id="purchaseNotes" rows="3" maxlength="300"></textarea></label></div><p class="form-note">Al confirmar, el stock se incrementa y el vencimiento del lote queda registrado.</p><div class="dialog-actions"><button type="button" class="secondary-button" data-close="purchaseDialog">Cancelar</button><button class="primary-button compact">REGISTRAR COMPRA</button></div></form></dialog>
 
   <dialog id="bulkDialog"><form id="bulkForm"><div class="dialog-head"><div><p class="eyebrow">HERRAMIENTA</p><h2>Actualización masiva de precios</h2></div><button type="button" class="close-button" data-close="bulkDialog">×</button></div><div class="form-row"><label>Operación<select id="bulkOperation"><option value="increase">Aumentar</option><option value="decrease">Disminuir</option></select></label><label>Porcentaje<input id="bulkPercent" required type="number" min="0.01" max="100" step="0.01"></label></div><label>Aplicar a<select id="bulkCategory"><option value="all">Todos los productos</option></select></label><button type="button" class="secondary-button full" id="previewBulk">VISTA PREVIA</button><div class="preview-table" id="bulkPreview"><p class="form-note">Completá los datos para ver los nuevos precios. Nada cambiará hasta confirmar.</p></div><div class="dialog-actions"><button type="button" class="secondary-button" data-close="bulkDialog">Cancelar</button><button class="primary-button compact" id="confirmBulk" disabled>CONFIRMAR CAMBIOS</button></div></form></dialog>
+
+  <dialog id="settingsDialog">
+    <div class="dialog-body">
+      <div class="dialog-head"><div><p class="eyebrow">PREFERENCIAS</p><h2>Ajustes</h2></div><button type="button" class="close-button" data-close="settingsDialog">×</button></div>
+
+      <div class="settings-section">
+        <h3>Apariencia</h3>
+        <div class="theme-options" id="themeOptions">
+          <button type="button" class="theme-option" data-theme-option="light">☀ Claro</button>
+          <button type="button" class="theme-option" data-theme-option="dark">☾ Oscuro</button>
+          <button type="button" class="theme-option" data-theme-option="system">◐ Sistema</button>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3>Copia de seguridad</h3>
+        <button type="button" class="secondary-button full" id="exportBackup">⇩ Descargar copia de seguridad (.json)</button>
+        <button type="button" class="secondary-button full" id="importBackup">⇧ Restaurar copia de seguridad</button>
+        <input type="file" id="importBackupFile" accept="application/json" hidden>
+      </div>
+
+      <div class="settings-section">
+        <h3>Exportar datos (CSV)</h3>
+        <div class="export-grid">
+          <button type="button" class="secondary-button" id="exportProductsCsv">Inventario</button>
+          <button type="button" class="secondary-button" id="exportPurchasesCsv">Compras</button>
+          <button type="button" class="secondary-button" id="exportSalesCsv2">Ventas</button>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3>Zona de riesgo</h3>
+        <div class="danger-zone">
+          <p>Borra productos, compras y ventas guardados en este navegador. No se puede deshacer.</p>
+          <button type="button" class="primary-button danger compact" id="clearAllData">Borrar todos los datos</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="commandDialog">
+    <div class="dialog-body">
+      <div class="command-input-row"><span>⌕</span><input id="commandInput" type="text" placeholder="Ir a una sección o buscar un producto…" autocomplete="off"></div>
+      <div class="command-results" id="commandResults"></div>
+    </div>
+  </dialog>
+
+  <dialog id="receiptDialog">
+    <div class="dialog-body">
+      <div class="dialog-head"><div><p class="eyebrow">COMPROBANTE</p><h2>Recibo</h2></div><button type="button" class="close-button" data-close="receiptDialog">×</button></div>
+      <div class="receipt" id="receiptContent"></div>
+      <div class="dialog-actions"><button type="button" class="secondary-button" data-close="receiptDialog">Cerrar</button><button type="button" class="primary-button compact" id="printReceipt">🖶 IMPRIMIR</button></div>
+    </div>
+  </dialog>
+
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <script src="app.js"></script>
 </body></html>
