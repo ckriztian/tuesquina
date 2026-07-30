@@ -155,7 +155,7 @@ function renderReorderSuggestions() {
   $('#reorderList').innerHTML = candidates.length
     ? candidates.map(p => {
       const suggested = Math.max(p.minStock * 2 - p.stock, p.minStock || 1, 1);
-      return `<div class="reorder-row"><div><strong>${escapeHtml(p.name)}</strong><small>${p.stock} en stock · mínimo ${p.minStock}</small></div><span class="badge num">+${suggested}</span><button class="icon-button" data-reorder="${p.id}" data-reorder-qty="${suggested}" title="Registrar compra">⇩</button></div>`;
+      return `<div class="reorder-row"><div><strong>${escapeHtml(p.name)}</strong><small>Stock ${p.stock} · mínimo ${p.minStock} · sugerido ${suggested}</small></div><div class="reorder-actions">${[10,20,50,100].map(q=>`<button data-reorder="${p.id}" data-reorder-qty="${q}">+${q}</button>`).join('')}</div></div>`;
     }).join('')
     : '<div class="empty-state"><strong>Sin faltantes</strong><small>No hay productos por debajo del mínimo.</small></div>';
 }
@@ -502,7 +502,7 @@ function toCsv(rows, headers) {
 function stamp() { return new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-'); }
 
 $('#exportBackup').addEventListener('click', () => {
-  const backup = { app: 'Tu Esquina', exportedAt: new Date().toISOString(), products, purchases, sales };
+  const backup = { app: 'Tu Esquina', version: 2, exportedAt: new Date().toISOString(), products, purchases, sales, suppliers, cash: cashData, settings: business };
   downloadFile(`tu-esquina-backup-${stamp()}.json`, JSON.stringify(backup, null, 2), 'application/json');
   showToast('Copia de seguridad descargada');
 });
@@ -519,6 +519,9 @@ $('#importBackupFile').addEventListener('change', event => {
       products = data.products.map(normalizeProduct);
       purchases = data.purchases.map(normalizePurchase);
       sales = data.sales.map(normalizeSale);
+      if (Array.isArray(data.suppliers)) { localStorage.setItem('laEsquina.suppliers', JSON.stringify(data.suppliers)); }
+      if (data.cash) { localStorage.setItem('laEsquina.cash', JSON.stringify(data.cash)); }
+      if (data.settings) { localStorage.setItem('laEsquina.settings', JSON.stringify(data.settings)); }
       save(); renderAll(); $('#settingsDialog').close();
       showToast('Copia de seguridad restaurada');
     } catch { showToast('El archivo no es una copia de seguridad válida', 'error'); }
@@ -614,3 +617,87 @@ function updateTime() {
 updateTime();
 setInterval(updateTime, 1000);
 renderAll();
+
+/* =====================================================================
+   Módulos comerciales 2.0. Las nuevas colecciones usan claves separadas
+   y se inicializan sin modificar las estructuras históricas.
+   ===================================================================== */
+const BUSINESS_KEYS = { suppliers: 'laEsquina.suppliers', cash: 'laEsquina.cash', settings: 'laEsquina.settings' };
+const loadObject = (key, fallback) => { try { return { ...fallback, ...(JSON.parse(localStorage.getItem(key)) || {}) }; } catch { return { ...fallback }; } };
+let suppliers = load(BUSINESS_KEYS.suppliers, []);
+if (!suppliers.length && purchases.length) suppliers = [...new Set(purchases.map(p => p.supplier).filter(Boolean))].map(name => ({ id: uid(), name, company: '', phone: '', email: '', address: '', notes: 'Migrado automáticamente desde el historial de compras' }));
+let cashData = loadObject(BUSINESS_KEYS.cash, { open: false, opening: 0, openedAt: '', movements: [], sessions: [] });
+let business = loadObject(BUSINESS_KEYS.settings, { name: 'Tu Esquina', currency: 'ARS', color: '#551128', goal: 100000, taxes: 'included', vat: 21, user: 'Administrador' });
+const legacySave = save;
+save = function saveBusinessData() {
+  legacySave();
+  localStorage.setItem(BUSINESS_KEYS.suppliers, JSON.stringify(suppliers));
+  localStorage.setItem(BUSINESS_KEYS.cash, JSON.stringify(cashData));
+  localStorage.setItem(BUSINESS_KEYS.settings, JSON.stringify(business));
+};
+
+function daySales(date = new Date()) { return sales.filter(s => new Date(s.date).toDateString() === date.toDateString()); }
+function unitsSold() { const result = {}; sales.forEach(s => s.items.forEach(i => result[i.id] = (result[i.id] || 0) + number(i.quantity))); return result; }
+function productCost(id) { return purchases.find(p => p.productId === id)?.unitCost || products.find(p => p.id === id)?.price * .65 || 0; }
+function estimatedProfit(list = sales) { return list.reduce((sum, s) => sum + s.items.reduce((n, i) => n + (i.price - productCost(i.id)) * i.quantity, 0), 0); }
+function applyBusinessTheme() {
+  document.documentElement.style.setProperty('--brand', business.color);
+  $$('.brand-name').forEach(el => { el.childNodes[0].textContent = business.name; });
+  document.title = `${business.name} — Gestión de kiosco`;
+}
+
+const baseDashboard = renderDashboard;
+renderDashboard = function renderCommercialDashboard() {
+  baseDashboard();
+  const daily = daySales(), revenue = daily.reduce((a, s) => a + s.total, 0), expired = products.filter(p => expirationState(p) === 'expired').length;
+  const soon = products.filter(p => ['urgent', 'soon'].includes(expirationState(p))).length, low = products.filter(p => p.stock <= p.minStock).length;
+  const cashCurrent = number(cashData.opening) + daily.filter(s => s.paymentMethod === 'Efectivo').reduce((a, s) => a + s.total, 0) + cashData.movements.filter(m => new Date(m.date).toDateString() === new Date().toDateString()).reduce((a, m) => a + m.amount, 0);
+  $('#dashboardMetrics').innerHTML = [
+    ['🛒','Ventas del día',money(revenue),`${daily.length} operaciones`], ['💵','Caja actual',money(cashCurrent),cashData.open ? 'Caja abierta' : 'Caja cerrada'],
+    ['📈','Ganancia estimada',money(estimatedProfit(daily)),'Según último costo'], ['🎫','Ticket promedio',money(daily.length ? revenue / daily.length : 0),'Por operación'],
+    ['✓','Cantidad de ventas',daily.length,'Hoy'], ['📦','Productos',products.length,'Registrados'], ['⚠','Stock bajo',low,'Requieren reposición'],
+    ['⛔','Vencidos',expired,'No vender'], ['📅','Próximos a vencer',soon,'Dentro de 30 días']
+  ].map(([icon,label,value,detail]) => `<div class="metric kpi"><i>${icon}</i><span>${label}</span><strong>${value}</strong><small>${detail}</small></div>`).join('');
+  const sold = unitsSold();
+  $('#topProductsTable').innerHTML = products.slice().sort((a,b)=>(sold[b.id]||0)-(sold[a.id]||0)).slice(0,5).map(p => `<tr><td><strong>${escapeHtml(p.name)}</strong><small>${escapeHtml(p.brand)}</small></td><td><span class="badge">${sold[p.id]||0} u.</span></td><td>${money(p.price)}</td><td>${p.stock}</td><td><button class="link-button" data-view="pos" data-add="${p.id}" ${p.stock ? '' : 'disabled'}>Vender</button></td></tr>`).join('') || '<tr><td colspan="5">Sin datos de venta.</td></tr>';
+  const pct = Math.min(100, Math.round(revenue / Math.max(1,business.goal) * 100));
+  $('#dailyGoalValue').textContent = `${money(revenue)} / ${money(business.goal)}`; $('#dailyGoalProgress').style.width = `${pct}%`; $('#dailyGoalLabel').textContent = `${pct}% alcanzado · faltan ${money(Math.max(0,business.goal-revenue))}`;
+  const expiring = products.filter(p => p.expiration && daysUntil(p.expiration) >= 0).sort((a,b)=>daysUntil(a.expiration)-daysUntil(b.expiration)).slice(0,4);
+  $('#calendarList').innerHTML = expiring.map(p => `<div class="timeline-row"><time>${formatDate(p.expiration)}</time><div><strong>${escapeHtml(p.name)}</strong><small>Vence en ${daysUntil(p.expiration)} días</small></div></div>`).join('') || '<div class="empty-state compact"><strong>Agenda despejada</strong><small>No hay vencimientos próximos.</small></div>';
+  const activity = [
+    ...sales.map(s=>({date:s.date,icon:'🛒',text:`Venta por ${money(s.total)}`})),
+    ...purchases.map(p=>({date:p.date,icon:'🚚',text:`Compra de ${p.quantity} × ${p.productName}`}))
+  ].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,7);
+  $('#activityList').innerHTML = activity.map(a=>`<div class="activity-row"><span>${a.icon}</span><div><strong>${escapeHtml(a.text)}</strong><small>${formatDate(a.date,true)} · ${business.user}</small></div></div>`).join('') || '<div class="empty-state compact"><strong>Sin movimientos</strong><small>Las operaciones aparecerán aquí.</small></div>';
+};
+
+function renderSuppliers() {
+  $('#supplierMetrics').innerHTML = metric('PROVEEDORES', suppliers.length) + metric('COMPRAS HISTÓRICAS', purchases.length) + metric('INVERSIÓN TOTAL', money(purchases.reduce((a,p)=>a+p.totalCost,0)));
+  $('#supplierGrid').innerHTML = suppliers.map(s => { const history=purchases.filter(p=>p.supplier===s.name); return `<article class="supplier-card"><div class="supplier-avatar">${escapeHtml(s.name.slice(0,2).toUpperCase())}</div><div><h3>${escapeHtml(s.name)}</h3><p>${escapeHtml(s.company||'Proveedor independiente')}</p></div><dl><div><dt>Teléfono</dt><dd>${escapeHtml(s.phone||'—')}</dd></div><div><dt>Email</dt><dd>${escapeHtml(s.email||'—')}</dd></div><div><dt>Dirección</dt><dd>${escapeHtml(s.address||'—')}</dd></div><div><dt>Compras</dt><dd>${history.length} · ${money(history.reduce((a,p)=>a+p.totalCost,0))}</dd></div></dl><small>${escapeHtml(s.notes||'Sin observaciones')}</small><button class="secondary-button" data-supplier-delete="${s.id}">Eliminar</button></article>`; }).join('') || '<div class="panel empty-state"><strong>Sumá tu primer proveedor</strong><small>Centralizá contactos e historial de compras.</small></div>';
+}
+function renderCash() {
+  const daily=daySales(), saleTotal=daily.reduce((a,s)=>a+s.total,0), movements=cashData.movements.filter(m=>new Date(m.date).toDateString()===new Date().toDateString());
+  const income=movements.filter(m=>m.amount>0).reduce((a,m)=>a+m.amount,0), expenses=Math.abs(movements.filter(m=>m.amount<0).reduce((a,m)=>a+m.amount,0)), current=number(cashData.opening)+saleTotal+income-expenses;
+  $('#cashMetrics').innerHTML=metric('CAJA INICIAL',money(cashData.opening))+metric('VENTAS',money(saleTotal))+metric('INGRESOS',money(income))+metric('EGRESOS',money(expenses),'',expenses?'warning':'')+metric('CAJA ACTUAL',money(current));
+  $('#cashStatus').textContent=cashData.open?'ABIERTA':'CERRADA'; $('#cashStatus').className=`badge ${cashData.open?'':'expired'}`; $('#cashToggle').textContent=cashData.open?'CERRAR CAJA':'ABRIR CAJA';
+  $('#cashSummary').innerHTML=movements.map(m=>`<div class="cash-row"><div><strong>${escapeHtml(m.note)}</strong><small>${formatDate(m.date,true)}</small></div><b class="${m.amount<0?'negative':''}">${m.amount>0?'+':''}${money(m.amount)}</b></div>`).join('')||'<div class="empty-state compact"><strong>Sin movimientos manuales</strong></div>';
+  $('#cashHistory').innerHTML=cashData.sessions.slice(0,8).map(s=>`<div class="timeline-row"><time>${formatDate(s.closedAt,true)}</time><div><strong>${money(s.total)}</strong><small>Apertura ${money(s.opening)}</small></div></div>`).join('')||'<div class="empty-state compact"><small>Todavía no hay cierres.</small></div>';
+}
+
+function barsHtml(entries) { const max=Math.max(...entries.map(x=>x[1]),1); return `<div class="bar-list">${entries.map(([name,value])=>`<div><label><span>${escapeHtml(name)}</span><b>${money(value)}</b></label><i><em style="width:${value/max*100}%"></em></i></div>`).join('')}</div>`; }
+function drawChart(id, values, colors=['#551128','#d3a72c']) { const c=$(`#${id}`); if(!c)return; const ctx=c.getContext('2d'), w=c.clientWidth||500, h=220, d=devicePixelRatio||1; c.width=w*d;c.height=h*d;ctx.scale(d,d);ctx.clearRect(0,0,w,h);const max=Math.max(...values.flatMap(v=>v.values),1);values.forEach((set,si)=>set.values.forEach((v,i)=>{const bw=(w-48)/set.values.length/values.length,x=32+i*(w-48)/set.values.length+si*bw,y=h-28-(v/max)*(h-55);ctx.fillStyle=colors[si];ctx.beginPath();ctx.roundRect(x,y,bw-4,h-28-y,4);ctx.fill();})); }
+function renderReports() { const revenue=sales.reduce((a,s)=>a+s.total,0), units=Object.values(unitsSold()).reduce((a,n)=>a+n,0); $('#reportMetrics').innerHTML=metric('INGRESOS',money(revenue))+metric('VENTAS',sales.length)+metric('UNIDADES',units)+metric('GANANCIA EST.',money(estimatedProfit())); const payments={};sales.forEach(s=>payments[s.paymentMethod]=(payments[s.paymentMethod]||0)+s.total);$('#paymentReport').innerHTML=barsHtml(Object.entries(payments));const cats={};sales.forEach(s=>s.items.forEach(i=>{const p=products.find(x=>x.id===i.id);cats[p?.category||'General']=(cats[p?.category||'General']||0)+i.price*i.quantity;}));$('#categoryReport').innerHTML=barsHtml(Object.entries(cats));$('#stockReport').innerHTML=`<div class="stat-list"><div><span>Stock bajo</span><b>${products.filter(p=>p.stock<=p.minStock).length}</b></div><div><span>Sin stock</span><b>${products.filter(p=>!p.stock).length}</b></div><div><span>Vencidos</span><b>${products.filter(p=>expirationState(p)==='expired').length}</b></div><div><span>Próximos</span><b>${products.filter(p=>['urgent','soon'].includes(expirationState(p))).length}</b></div></div>`;const days=[...Array(7)].map((_,i)=>{const d=today();d.setDate(d.getDate()-6+i);return daySales(d).reduce((a,s)=>a+s.total,0)});requestAnimationFrame(()=>drawChart('reportChart',[{values:days}])); }
+function renderFinance() { const daily=daySales().reduce((a,s)=>a+s.total,0), now=new Date(), monthly=sales.filter(s=>{const d=new Date(s.date);return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear()});const monthTotal=monthly.reduce((a,s)=>a+s.total,0),cost=monthly.reduce((a,s)=>a+s.items.reduce((n,i)=>n+productCost(i.id)*i.quantity,0),0),profit=estimatedProfit(monthly);$('#financeMetrics').innerHTML=metric('VENTAS DEL DÍA',money(daily))+metric('VENTAS DEL MES',money(monthTotal))+metric('GANANCIA EST.',money(profit))+metric('COSTO MERCADERÍA',money(cost))+metric('MARGEN',`${monthTotal?Math.round(profit/monthTotal*100):0}%`);const sold=unitsSold(),rank=products.map(p=>[p.name,(p.price-productCost(p.id))*(sold[p.id]||0)]).sort((a,b)=>b[1]-a[1]);$('#profitableProducts').innerHTML=barsHtml(rank.slice(0,5));$('#unprofitableProducts').innerHTML=barsHtml(rank.slice(-5).reverse());requestAnimationFrame(()=>drawChart('financeChart',[{values:[monthTotal]},{values:[cost]}])); }
+function renderBusiness() { applyBusinessTheme(); renderSuppliers(); renderCash(); renderReports(); renderFinance(); $('#settingBusinessName').value=business.name;$('#settingCurrency').value=business.currency;$('#settingColor').value=business.color;$('#settingGoal').value=business.goal;$('#settingTaxes').value=business.taxes;$('#settingVat').value=business.vat; }
+const baseRenderAll=renderAll; renderAll=function renderEverything(){baseRenderAll();renderBusiness();};
+
+$('#addSupplier').addEventListener('click',()=>{const name=prompt('Nombre del proveedor:');if(!name)return;suppliers.push({id:uid(),name,company:prompt('Empresa:')||'',phone:prompt('Teléfono:')||'',email:prompt('Email:')||'',address:prompt('Dirección:')||'',notes:prompt('Observaciones:')||''});save();renderSuppliers();showToast('Proveedor agregado');});
+document.addEventListener('click',e=>{const del=e.target.closest('[data-supplier-delete]');if(del&&confirm('¿Eliminar este proveedor?')){suppliers=suppliers.filter(s=>s.id!==del.dataset.supplierDelete);save();renderSuppliers();}const cash=e.target.closest('[data-cash-action]');if(cash) handleCash(cash.dataset.cashAction);});
+function handleCash(action){if(action==='open'||action==='toggle'&&!cashData.open){const opening=number(prompt('Caja inicial:',cashData.opening||0));cashData.open=true;cashData.opening=opening;cashData.openedAt=new Date().toISOString();showToast('Caja abierta');}else if(action==='close'||action==='toggle'){const total=number(cashData.opening)+daySales().reduce((a,s)=>a+s.total,0)+cashData.movements.reduce((a,m)=>a+m.amount,0);cashData.sessions.unshift({openedAt:cashData.openedAt,closedAt:new Date().toISOString(),opening:cashData.opening,total});cashData.open=false;showToast('Caja cerrada');}else if(action==='movement'){if(!cashData.open)return showToast('Primero debés abrir la caja','error');const amount=number(prompt('Monto (negativo para egreso):'));if(!amount)return;cashData.movements.unshift({id:uid(),date:new Date().toISOString(),amount,note:prompt('Concepto:')||'Movimiento manual'});}save();renderCash();renderDashboard();}
+$('#businessSettings').addEventListener('submit',e=>{e.preventDefault();business={...business,name:$('#settingBusinessName').value.trim(),currency:$('#settingCurrency').value,color:$('#settingColor').value,goal:number($('#settingGoal').value),taxes:$('#settingTaxes').value,vat:number($('#settingVat').value)};save();renderAll();showToast('Configuración guardada');});
+document.querySelector('.settings-actions').addEventListener('click',e=>{const a=e.target.closest('[data-settings-action]')?.dataset.settingsAction;if(a==='backup')$('#exportBackup').click();if(a==='restore')$('#importBackup').click();if(a==='inventory')$('#exportProductsCsv').click();if(a==='sales')exportSalesCsv();if(a==='clear')$('#clearAllData').click();});
+$('#topNewPurchase').addEventListener('click',()=>openPurchaseDialog());$('#topNewProduct').addEventListener('click',()=>openProductDialog());$('#topBackup').addEventListener('click',()=>$('#exportBackup').click());$('#globalSearch').addEventListener('focus',openCommandPalette);
+$('#notificationButton').addEventListener('click',()=>{const notices=[];products.filter(p=>!p.stock).forEach(p=>notices.push(`${p.name}: sin stock`));products.filter(p=>expirationState(p)==='expired').forEach(p=>notices.push(`${p.name}: vencido`));if(cashData.open)notices.push('La caja continúa abierta');alert(notices.length?notices.join('\n'):'No hay notificaciones pendientes.');});
+$('#reportExport').addEventListener('click',exportSalesCsv);$('#reportPeriod').addEventListener('change',renderReports);
+const commercialTime=updateTime;updateTime=function updateCommercialTime(){commercialTime();const now=new Date();$('#topClock').textContent=now.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});$('#topDate').textContent=now.toLocaleDateString('es-AR',{weekday:'short',day:'2-digit',month:'short'});const count=products.filter(p=>!p.stock||expirationState(p)==='expired'||['urgent','soon'].includes(expirationState(p))).length+(cashData.open?1:0);$('#notificationCount').textContent=count||'';};
+updateTime(); setInterval(updateTime, 1000); renderAll();
