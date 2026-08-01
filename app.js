@@ -5,7 +5,7 @@
    ya guardada en el navegador se conserva sin cambios.
    ========================================================================= */
 
-const STORAGE = { products: 'laEsquina.products', purchases: 'laEsquina.purchases', sales: 'laEsquina.sales', costHistory: 'laEsquina.costHistory', theme: 'laEsquina.theme' };
+const STORAGE = { products: 'laEsquina.products', purchases: 'laEsquina.purchases', sales: 'laEsquina.sales', costHistory: 'laEsquina.costHistory', theme: 'laEsquina.theme', migration: 'laEsquina.productMigration.v4' };
 const UNITS = ['Unidad', 'Gramos', 'Kilogramos', 'Mililitros', 'Litros'];
 
 const seedProducts = [
@@ -23,6 +23,26 @@ const number = value => Number.isFinite(Number(value)) ? Number(value) : 0;
 const money = value => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 2 }).format(number(value));
 const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
 const uid = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+function configuredGeneralMargin() { try { return Math.max(0, number(JSON.parse(localStorage.getItem('laEsquina.settings'))?.generalMargin ?? 30)); } catch { return 30; } }
+function configuredRounding() { try { return JSON.parse(localStorage.getItem('laEsquina.settings'))?.rounding || '50'; } catch { return '50'; } }
+function normalizeText(value) { return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase().replace(/\s+/g, ' '); }
+function canonicalUnit(value) {
+  const unit = normalizeText(value).replace(/\./g, '');
+  if (['g', 'gramo', 'gramos'].includes(unit)) return 'Gramos';
+  if (['kg', 'kilo', 'kilos', 'kilogramo', 'kilogramos'].includes(unit)) return 'Kilogramos';
+  if (['ml', 'mililitro', 'mililitros'].includes(unit)) return 'Mililitros';
+  if (['l', 'lt', 'lts', 'litro', 'litros'].includes(unit)) return 'Litros';
+  return 'Unidad';
+}
+function normalizeContent(content, unit) {
+  const value = number(content), canonical = canonicalUnit(unit);
+  if (canonical === 'Kilogramos') return { value: value * 1000, family: 'g' };
+  if (canonical === 'Gramos') return { value, family: 'g' };
+  if (canonical === 'Litros') return { value: value * 1000, family: 'ml' };
+  if (canonical === 'Mililitros') return { value, family: 'ml' };
+  return { value, family: 'u' };
+}
+function presentationKey(p) { const n = normalizeContent(p.content ?? p.contenido, p.unit ?? p.unidadMedida); return `${normalizeText(p.name ?? p.nombre)}|${normalizeText(p.brand ?? p.marca)}|${n.family}:${Math.round(n.value * 1000) / 1000}`; }
 
 /* ---------------------------------------------------------------------
    Persistencia y migración: conserva las claves históricas y completa
@@ -38,15 +58,26 @@ function normalizeProduct(p) {
   const precioVenta = Math.max(0, number(p.precioVenta ?? p.price));
   const costoPromedio = Math.max(0, number(p.costoPromedio ?? p.averageCost ?? 0));
   const stockMinimo = Math.max(0, Math.floor(number(p.stockMinimo ?? p.minStock ?? 5)));
+  const now = new Date().toISOString();
+  const name = String(p.name ?? p.nombre ?? 'Producto sin nombre');
+  const brand = String(p.brand ?? p.marca ?? 'Sin marca');
+  const category = String(p.category ?? p.categoria ?? 'General');
+  const content = Math.max(0, number(p.content ?? p.contenido ?? 1)) || 1;
+  const rawUnit = p.unit ?? p.unidadMedida ?? 'Unidad';
+  const unit = canonicalUnit(rawUnit);
+  const code = String(p.code ?? p.codigoBarras ?? '').trim();
   return {
-    id: p.id || uid(), name: String(p.name || 'Producto sin nombre'), brand: String(p.brand || 'Sin marca'),
-    category: String(p.category || 'General'), code: String(p.code || ''), price: precioVenta, precioVenta,
+    ...p, id: p.id || uid(), name, nombre: name, brand, marca: brand,
+    category, categoria: category, code, codigoBarras: code, price: precioVenta, precioVenta,
     costoPromedio, ultimoCostoCompra: Math.max(0, number(p.ultimoCostoCompra ?? p.lastPurchaseCost ?? costoPromedio)),
-    porcentajeRecargoPredeterminado: Math.max(0, number(p.porcentajeRecargoPredeterminado ?? 30)),
+    porcentajeRentabilidadPredeterminado: Math.max(0, number(p.porcentajeRentabilidadPredeterminado ?? p.porcentajeRecargoPredeterminado ?? configuredGeneralMargin())),
+    tipoRentabilidadPredeterminado: p.tipoRentabilidadPredeterminado === 'margen' ? 'margen' : 'recargo',
+    tipoRedondeoPredeterminado: p.tipoRedondeoPredeterminado || configuredRounding(),
     fechaUltimaCompra: p.fechaUltimaCompra || '',
     stock: Math.max(0, Math.floor(number(p.stock))), minStock: stockMinimo, stockMinimo,
-    content: Math.max(0, number(p.content)), unit: UNITS.includes(p.unit) ? p.unit : 'Unidad',
-    expiration: p.expiration || '', batches: Array.isArray(p.batches) ? p.batches : []
+    content, contenido: content, unit, unidadMedida: unit, expiration: p.expiration ?? p.fechaVencimiento ?? '', fechaVencimiento: p.expiration ?? p.fechaVencimiento ?? '',
+    fechaCreacion: p.fechaCreacion || now, fechaModificacion: p.fechaModificacion || now,
+    batches: Array.isArray(p.batches) ? p.batches : []
   };
 }
 function normalizePurchase(p) {
@@ -73,6 +104,7 @@ function save() {
   localStorage.setItem(STORAGE.costHistory, JSON.stringify(costHistory));
 }
 save();
+localStorage.setItem(STORAGE.migration, '4');
 
 /* ---------------------------------------------------------------------
    Utilidades generales
@@ -95,7 +127,7 @@ function showToast(message, type = 'ok', actionLabel = '', actionFn = null, dura
   showToast.timer = setTimeout(() => toast.classList.remove('show'), duration);
 }
 
-function presentation(p) { return p.content ? `${new Intl.NumberFormat('es-AR').format(p.content)} ${p.unit}` : p.unit; }
+function presentation(p) { const labels = { Unidad: 'unidad', Gramos: 'g', Kilogramos: 'kg', Mililitros: 'ml', Litros: 'L' }; return `${new Intl.NumberFormat('es-AR', { maximumFractionDigits: 3 }).format(p.content || 1)} ${labels[p.unit] || p.unit}`; }
 // Las fechas YYYY-MM-DD se crean a medianoche local para evitar corrimientos por zona horaria.
 function localDate(value) { if (!value) return null; const [y, m, d] = value.slice(0, 10).split('-').map(Number); return new Date(y, m - 1, d); }
 function today() { const now = new Date(); return new Date(now.getFullYear(), now.getMonth(), now.getDate()); }
@@ -295,7 +327,7 @@ function renderSales() {
 }
 function populateProductSelect() {
   const selected = $('#purchaseProduct').value;
-  $('#purchaseProduct').innerHTML = '<option value="">Seleccionar…</option>' + products.map(p => `<option value="${p.id}">${escapeHtml(p.name)} — ${escapeHtml(p.brand)}</option>`).join('');
+  $('#purchaseProduct').innerHTML = '<option value="">Seleccionar…</option>' + products.map(p => `<option value="${p.id}">${escapeHtml(p.name)} · ${escapeHtml(presentation(p))} — ${escapeHtml(p.brand)}</option>`).join('');
   $('#purchaseProduct').value = selected;
   syncPurchaseProduct();
 }
@@ -313,15 +345,29 @@ function openProductDialog(product) {
     $('#productCode').value = product.code; $('#productPrice').value = product.price; $('#productStock').value = product.stock;
     $('#productMinStock').value = product.minStock; $('#productContent').value = product.content || ''; $('#productUnit').value = product.unit;
     $('#productExpiration').value = product.expiration;
-  } else { $('#productMinStock').value = 5; $('#productStock').value = 0; }
+  } else { $('#productMinStock').value = 5; $('#productStock').value = 0; $('#productContent').value = 1; }
   $('#productDialog').showModal();
 }
+const CONFIG_AUTH_KEY = 'tuEsquinaConfigAuth';
+let previousView = 'dashboard';
+function estaConfiguracionAutorizada() { return sessionStorage.getItem(CONFIG_AUTH_KEY) === 'true'; }
+function validarClaveConfiguracion(value) { return value === 'SP'; }
+function solicitarAccesoConfiguracion() {
+  previousView = $('.view.active')?.id.replace('-view', '') || 'dashboard';
+  $('#configAccessForm').reset(); $('#configAccessError').hidden = true; $('#configAccessDialog').showModal();
+  requestAnimationFrame(() => $('#configPassword').focus());
+}
+function bloquearConfiguracion() { sessionStorage.removeItem(CONFIG_AUTH_KEY); switchView('dashboard'); showToast('Configuración bloqueada'); }
 function switchView(view) {
+  if (view === 'settings' && !estaConfiguracionAutorizada()) return solicitarAccesoConfiguracion();
   $$('.nav-item,.view').forEach(el => el.classList.remove('active'));
   $(`.nav-item[data-view="${view}"]`)?.classList.add('active');
   $(`#${view}-view`)?.classList.add('active');
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
+$('#configAccessForm').addEventListener('submit', event => { event.preventDefault(); if (!validarClaveConfiguracion($('#configPassword').value)) { $('#configAccessError').hidden = false; $('#configPassword').value = ''; $('#configPassword').focus(); return; } sessionStorage.setItem(CONFIG_AUTH_KEY, 'true'); $('#configAccessDialog').close(); switchView('settings'); showToast('Acceso autorizado'); });
+$('#cancelConfigAccess').addEventListener('click', () => { $('#configAccessDialog').close(); switchView(previousView); });
+$('#lockSettings').addEventListener('click', bloquearConfiguracion);
 
 /* ---------------------------------------------------------------------
    Delegación global de clics
@@ -404,12 +450,15 @@ $('#addProduct').addEventListener('click', () => openProductDialog());
 $('#dashboardAddProduct').addEventListener('click', () => openProductDialog());
 $('#productForm').addEventListener('submit', event => {
   event.preventDefault();
-  const id = $('#productId').value, name = $('#productName').value.trim(), price = number($('#productPrice').value), stock = number($('#productStock').value), minStock = number($('#productMinStock').value);
-  if (!name || price < 0 || stock < 0 || minStock < 0 || ![price, stock, minStock].every(Number.isFinite)) return showToast('Revisá nombre, precio y stock', 'error');
-  const duplicate = products.find(p => p.id !== id && p.name.toLowerCase() === name.toLowerCase() && p.brand.toLowerCase() === ($('#productBrand').value.trim() || 'Sin marca').toLowerCase() && presentation(p) === presentation({ content: number($('#productContent').value), unit: $('#productUnit').value }));
+  const id = $('#productId').value, name = $('#productName').value.trim(), price = number($('#productPrice').value), stock = number($('#productStock').value), minStock = number($('#productMinStock').value), content = number($('#productContent').value), code = $('#productCode').value.trim();
+  if (!name || content <= 0 || price < 0 || stock < 0 || minStock < 0 || ![content, price, stock, minStock].every(Number.isFinite)) return showToast('El nombre y una presentación mayor que cero son obligatorios', 'error');
+  const barcodeOwner = code && products.find(p => p.id !== id && normalizeText(p.code) === normalizeText(code));
+  if (barcodeOwner) return showToast(`El código de barras ya pertenece a ${barcodeOwner.name} · ${presentation(barcodeOwner)}`, 'error');
+  const candidate = { name, brand: $('#productBrand').value.trim() || 'Sin marca', content, unit: $('#productUnit').value };
+  const duplicate = products.find(p => p.id !== id && presentationKey(p) === presentationKey(candidate));
   if (duplicate && !confirm('Ya existe un producto con el mismo nombre, marca y presentación. ¿Guardar de todos modos?')) return;
   const previous = id ? products.find(p => p.id === id) : {};
-  const data = normalizeProduct({ ...previous, id: id || uid(), name, brand: $('#productBrand').value.trim() || 'Sin marca', category: $('#productCategory').value.trim() || 'General', code: $('#productCode').value.trim(), price, precioVenta: price, stock, minStock, content: number($('#productContent').value), unit: $('#productUnit').value, expiration: $('#productExpiration').value, batches: previous?.batches || [] });
+  const data = normalizeProduct({ ...previous, id: id || uid(), name, brand: candidate.brand, category: $('#productCategory').value.trim() || 'General', code, price, precioVenta: price, stock, minStock, content, unit: candidate.unit, expiration: $('#productExpiration').value, fechaCreacion: previous?.fechaCreacion, fechaModificacion: new Date().toISOString(), batches: previous?.batches || [] });
   if (id) Object.assign(products.find(p => p.id === id), data); else products.push(data);
   save(); renderAll(); $('#productDialog').close();
   showToast(id ? 'Producto actualizado' : 'Producto agregado');
@@ -418,107 +467,83 @@ $('#productForm').addEventListener('submit', event => {
 /* ---------------------------------------------------------------------
    Compras
    --------------------------------------------------------------------- */
+function productProfitDefaults(product) {
+  const categoryDefault = business?.categoryMargins?.[product.category];
+  return {
+    percent: product.porcentajeRentabilidadPredeterminado ?? categoryDefault ?? business?.generalMargin ?? 30,
+    calculation: product.tipoRentabilidadPredeterminado || 'recargo',
+    rounding: product.tipoRedondeoPredeterminado || business?.rounding || 'none'
+  };
+}
+function calculateAverageCost(stock, average, quantity, unitCost) {
+  if (![stock, average, quantity, unitCost].every(Number.isFinite) || stock < 0 || average < 0 || quantity <= 0 || unitCost <= 0) return NaN;
+  return !stock || !average ? unitCost : ((stock * average) + (quantity * unitCost)) / (stock + quantity);
+}
+function redondearPrecio(price, mode = 'none') {
+  if (!Number.isFinite(price) || price < 0) return NaN;
+  if (mode === 'none') return Math.round(price * 100) / 100;
+  const up = mode.startsWith('up-'), multiple = number(mode.replace('up-', '')) || 1;
+  return (up ? Math.ceil(price / multiple) : Math.round(price / multiple)) * multiple;
+}
+function calculateSuggestedPrice(cost, percent, calculation = 'recargo') {
+  if (!Number.isFinite(cost) || cost < 0 || !Number.isFinite(percent) || percent < 0 || calculation === 'margen' && percent >= 100) return NaN;
+  return calculation === 'margen' ? cost / (1 - percent / 100) : cost * (1 + percent / 100);
+}
+function historicalCosts(productId) { return purchases.filter(p => p.productId === productId && p.unitCost > 0); }
 function syncPurchaseProduct() {
   const p = products.find(x => x.id === $('#purchaseProduct').value);
   $('#purchaseBrand').value = p?.brand || '';
-  if (p) { $('#purchaseContent').value = p.content || ''; $('#purchaseUnit').value = p.unit; }
+  if (!p) return updatePurchasePreview();
+  const defaults = productProfitDefaults(p);
+  $('#purchasePercent').value = defaults.percent; $('#purchaseCalculation').value = defaults.calculation; $('#purchaseRounding').value = defaults.rounding;
+  updatePurchasePreview();
 }
-function calcPurchaseTotal() { $('#purchaseTotalCost').value = (number($('#purchaseQuantity').value) * number($('#purchaseUnitCost').value)).toFixed(2); }
+function updatePurchasePreview() {
+  const p = products.find(x => x.id === $('#purchaseProduct').value), quantity = number($('#purchaseQuantity').value), cost = number($('#purchaseUnitCost').value), percent = number($('#purchasePercent').value), calculation = $('#purchaseCalculation').value;
+  $('#purchaseTotalCost').value = (quantity * cost).toFixed(2);
+  $('#calculationHelp').textContent = calculation === 'margen' ? 'Margen: porcentaje de ganancia contenido dentro del precio final.' : 'Recargo: porcentaje agregado al costo.';
+  if (!p || quantity <= 0 || cost <= 0 || percent < 0 || calculation === 'margen' && percent >= 100) { $('#purchasePreview').innerHTML = calculation === 'margen' && percent >= 100 ? '<p class="profit-warning danger">El margen debe ser menor que 100 %.</p>' : ''; return; }
+  const average = calculateAverageCost(p.stock, p.costoPromedio, quantity, cost), raw = calculateSuggestedPrice(average, percent, calculation), rounded = redondearPrecio(raw, $('#purchaseRounding').value), profit = rounded - average, margin = rounded ? profit / rounded * 100 : 0;
+  $('#purchasePreview').innerHTML = `<div class="recommend-summary">${[['Último costo',money(p.ultimoCostoCompra)],['Costo promedio anterior',money(p.costoPromedio)],['Nuevo costo promedio',money(average)],['Precio actual',money(p.precioVenta)],['Sugerido sin redondear',money(raw)],['Sugerido final',money(rounded)],['Ganancia estimada/u.',money(profit)],['Rentabilidad sobre venta',`${margin.toFixed(2)}%`]].map(([l,v])=>`<div><span>${l}</span><strong>${v}</strong></div>`).join('')}</div>`;
+  const history = historicalCosts(p.id), last = history[0], minimum = history.length ? Math.min(...history.map(x=>x.unitCost)) : 0, difference = last ? cost-last.unitCost : 0, variation = last?.unitCost ? difference/last.unitCost*100 : 0;
+  $('#providerComparison').innerHTML = history.length ? `<p><strong>Comparación:</strong> último proveedor ${escapeHtml(last.supplier)} · último ${money(last.unitCost)} · menor histórico ${money(minimum)} · diferencia ${difference>=0?'+':''}${money(difference)} (${variation>=0?'+':''}${variation.toFixed(2)}%).</p>${variation > 10 ? '<p class="profit-warning warning">El costo actual es significativamente mayor que el anterior.</p>' : ''}` : '<p class="form-note">Sin compras anteriores para comparar.</p>';
+}
 function openPurchaseDialog(productId = '', quantity = '') {
   if (!products.length) return openProductDialog();
-  $('#purchaseForm').reset();
-  populateProductSelect();
-  $('#purchaseDate').value = new Date().toLocaleDateString('en-CA');
-  if (productId) { $('#purchaseProduct').value = productId; syncPurchaseProduct(); }
-  if (quantity) { $('#purchaseQuantity').value = quantity; calcPurchaseTotal(); }
-  $('#purchaseDialog').showModal();
+  $('#purchaseForm').reset(); populateProductSelect(); $('#purchaseDate').value = new Date().toLocaleDateString('en-CA');
+  if (productId) $('#purchaseProduct').value = productId;
+  if (quantity) $('#purchaseQuantity').value = quantity;
+  syncPurchaseProduct(); $('#purchaseDialog').showModal();
 }
 $('#newPurchase').addEventListener('click', () => openPurchaseDialog());
 $('#purchaseProduct').addEventListener('change', syncPurchaseProduct);
-$('#purchaseQuantity').addEventListener('input', calcPurchaseTotal);
-$('#purchaseUnitCost').addEventListener('input', calcPurchaseTotal);
+['purchaseQuantity','purchaseUnitCost','purchasePercent','purchaseCalculation','purchaseRounding'].forEach(id => $(`#${id}`).addEventListener('input', updatePurchasePreview));
+$('.purchase-quick').addEventListener('click', e => { const b=e.target.closest('[data-purchase-percent]'); if(b){$('#purchasePercent').value=b.dataset.purchasePercent;updatePurchasePreview();} });
 $('#createFromPurchase').addEventListener('click', () => { $('#purchaseDialog').close(); openProductDialog(); showToast('Creá el producto y luego registrá la compra'); });
 $('#purchaseForm').addEventListener('submit', event => {
   event.preventDefault();
-  const product = products.find(p => p.id === $('#purchaseProduct').value), quantity = number($('#purchaseQuantity').value), unitCost = number($('#purchaseUnitCost').value);
-  if (!product || quantity <= 0 || !Number.isInteger(quantity) || unitCost <= 0 || !Number.isFinite(quantity * unitCost)) return showToast('La cantidad y el costo deben ser mayores que cero', 'error');
-  const expiration = $('#purchaseExpiration').value;
-  const stockAnterior = product.stock;
-  const costoAnterior = product.costoPromedio;
-  const stockFinal = stockAnterior + quantity;
-  // Si nunca hubo un costo, las existencias heredadas no inventan un valor:
-  // la primera compra establece el costo base para todo el stock resultante.
-  const nuevoCostoPromedio = costoAnterior > 0
-    ? ((stockAnterior * costoAnterior) + (quantity * unitCost)) / stockFinal
-    : unitCost;
-  if (!Number.isFinite(nuevoCostoPromedio) || stockFinal <= 0) return showToast('No se pudo calcular el costo promedio', 'error');
-  const precioVentaAnterior = product.precioVenta;
-  product.stock = stockFinal;
-  product.ultimoCostoCompra = unitCost;
-  product.costoPromedio = nuevoCostoPromedio;
-  product.fechaUltimaCompra = $('#purchaseDate').value;
-  if (expiration) { product.batches.push({ id: uid(), quantity, expiration, purchaseDate: $('#purchaseDate').value }); if (!product.expiration || localDate(expiration) < localDate(product.expiration)) product.expiration = expiration; }
-  product.brand = $('#purchaseBrand').value.trim() || product.brand;
-  product.content = number($('#purchaseContent').value) || product.content;
-  product.unit = $('#purchaseUnit').value;
-  const purchaseId = uid();
-  purchases.unshift({ id: purchaseId, date: $('#purchaseDate').value, supplier: $('#supplierName').value.trim(), productId: product.id, productName: product.name, brand: product.brand, quantity, content: product.content, unit: product.unit, unitCost, totalCost: quantity * unitCost, expiration, notes: $('#purchaseNotes').value.trim(), stockAnterior, costoAnterior, nuevoCostoPromedio });
-  const historyEntry = { id: uid(), purchaseId, fecha: new Date().toISOString(), productoId: product.id, stockAnterior, cantidadComprada: quantity, costoAnterior, nuevoCostoCompra: unitCost, nuevoCostoPromedio, precioVentaAnterior, precioVentaNuevo: precioVentaAnterior, porcentajeAplicado: null, usuario: business?.user || 'Administrador', motivo: 'Compra registrada; precio pendiente de confirmación' };
-  costHistory.unshift(historyEntry);
-  save(); renderAll(); $('#purchaseDialog').close();
-  openPriceRecommendation(product, historyEntry);
+  const product = products.find(p => p.id === $('#purchaseProduct').value), quantity = number($('#purchaseQuantity').value), unitCost = number($('#purchaseUnitCost').value), percent = number($('#purchasePercent').value), calculation = $('#purchaseCalculation').value, rounding = $('#purchaseRounding').value;
+  if (!product || quantity <= 0 || !Number.isInteger(quantity) || unitCost <= 0 || percent < 0 || calculation === 'margen' && percent >= 100 || ![quantity, unitCost, percent].every(Number.isFinite)) return showToast('Revisá cantidad, costo, porcentaje y tipo de cálculo', 'error');
+  const stockAnterior=product.stock, costoAnterior=product.costoPromedio, stockNuevo=stockAnterior+quantity, nuevoCostoPromedio=calculateAverageCost(stockAnterior,costoAnterior,quantity,unitCost);
+  if (!Number.isFinite(nuevoCostoPromedio)) return showToast('No se pudo calcular el costo promedio', 'error');
+  const raw=calculateSuggestedPrice(nuevoCostoPromedio,percent,calculation), suggested=redondearPrecio(raw,rounding), precioVentaAnterior=product.precioVenta, expiration=$('#purchaseExpiration').value, purchaseId=uid(), supplier=$('#supplierName').value.trim();
+  product.stock=stockNuevo; product.ultimoCostoCompra=unitCost; product.costoPromedio=nuevoCostoPromedio; product.fechaUltimaCompra=$('#purchaseDate').value; product.fechaModificacion=new Date().toISOString();
+  if(expiration){product.batches.push({id:uid(),quantity,expiration,purchaseDate:$('#purchaseDate').value,lote:$('#purchaseBatch').value.trim()});if(!product.expiration||localDate(expiration)<localDate(product.expiration)) product.expiration=product.fechaVencimiento=expiration;}
+  const item={productoId:product.id,productoIdLegacy:product.id,cantidad:quantity,costoUnitario:unitCost,subtotal:quantity*unitCost,costoPromedioAnterior:costoAnterior,nuevoCostoPromedio,precioVentaAnterior,precioVentaSugerido:suggested,margenConfigurado:percent,tipoCalculo:calculation,tipoRedondeo:rounding,fechaVencimiento:expiration,lote:$('#purchaseBatch').value.trim()};
+  purchases.unshift({id:purchaseId,fecha:$('#purchaseDate').value,date:$('#purchaseDate').value,proveedorId:normalizeText(supplier),nombreProveedor:supplier,supplier,productos:[item],totalCompra:quantity*unitCost,productId:product.id,productName:product.name,brand:product.brand,quantity,content:product.content,unit:product.unit,unitCost,totalCost:quantity*unitCost,expiration,comprobante:$('#purchaseReceipt').value.trim(),notes:$('#purchaseNotes').value.trim(),...item});
+  const historyEntry={id:uid(),purchaseId,fecha:new Date().toISOString(),productoId:product.id,nombreProducto:product.name,presentacion:presentation(product),proveedor:supplier,stockAnterior,cantidadComprada:quantity,stockNuevo,costoPromedioAnterior:costoAnterior,costoCompraNuevo:unitCost,costoPromedioNuevo:nuevoCostoPromedio,precioVentaAnterior,precioVentaSugerido:suggested,precioVentaAplicado:precioVentaAnterior,porcentaje:percent,tipoCalculo:calculation,tipoRedondeo:rounding,usuario:business?.user||'Administrador',motivo:'Compra registrada; precio pendiente de confirmación'};
+  costHistory.unshift(historyEntry); save();renderAll();$('#purchaseDialog').close();openPriceRecommendation(product,historyEntry);
 });
-
-let pendingRecommendation = null;
-function roundCommercial(value, mode = business?.rounding || 'none') {
-  if (!Number.isFinite(value)) return 0;
-  if (mode === 'none') return Math.round(value * 100) / 100;
-  const alwaysUp = mode.startsWith('up-');
-  const multiple = number(mode.replace('up-', '')) || 1;
-  return (alwaysUp ? Math.ceil(value / multiple) : Math.round(value / multiple)) * multiple;
-}
-function suggestedPrice(cost, percent) { return roundCommercial(cost * (1 + percent / 100)); }
-function openPriceRecommendation(product, historyEntry) {
-  pendingRecommendation = { product, historyEntry };
-  $('#recommendPercent').value = product.porcentajeRecargoPredeterminado;
-  $('#manualRecommendedPrice').value = '';
-  renderRecommendation();
-  $('#priceRecommendationDialog').showModal();
-}
-function renderRecommendation() {
-  if (!pendingRecommendation) return;
-  const { product: p, historyEntry: h } = pendingRecommendation;
-  const profit = p.precioVenta - p.costoPromedio;
-  const profitability = p.costoPromedio > 0 ? profit / p.costoPromedio * 100 : 0;
-  const percent = Math.max(0, number($('#recommendPercent').value));
-  $('#recommendSummary').innerHTML = [
-    ['Stock anterior', h.stockAnterior], ['Cantidad comprada', h.cantidadComprada], ['Stock final', p.stock],
-    ['Costo promedio anterior', money(h.costoAnterior)], ['Nuevo costo de compra', money(h.nuevoCostoCompra)],
-    ['Nuevo costo promedio', money(h.nuevoCostoPromedio)], ['Precio de venta actual', money(p.precioVenta)],
-    ['Ganancia / pérdida por unidad', money(profit)], ['Rentabilidad actual', `${profitability.toFixed(2)}%`]
-  ].map(([label,value]) => `<div><span>${label}</span><strong>${value}</strong></div>`).join('');
-  const warning = $('#profitWarning');
-  warning.hidden = !(profit < 0 || profitability < number(business.minimumMargin));
-  warning.className = `profit-warning ${profit < 0 ? 'danger' : 'warning'}`;
-  warning.textContent = profit < 0 ? `El precio de venta actual se encuentra por debajo del costo promedio. Este producto generaría una pérdida estimada de ${money(Math.abs(profit))} por unidad.` : `La rentabilidad actual es inferior al mínimo configurado (${business.minimumMargin}%).`;
-  $('#recommendedValue').textContent = money(suggestedPrice(p.costoPromedio, percent));
-  $('#quickRecommendations').innerHTML = [20,25,30,40,50].map(x => `<button type="button" data-quick-percent="${x}"><b>${x}%</b><span>${money(suggestedPrice(p.costoPromedio,x))}</span></button>`).join('');
-}
-$('#recommendPercent').addEventListener('input', renderRecommendation);
-$('#quickRecommendations').addEventListener('click', e => { const b=e.target.closest('[data-quick-percent]'); if(b){ $('#recommendPercent').value=b.dataset.quickPercent; renderRecommendation(); } });
-$('#priceRecommendationForm').addEventListener('submit', e => {
-  e.preventDefault(); if (!pendingRecommendation) return;
-  const action = e.submitter?.value || 'later', { product, historyEntry } = pendingRecommendation;
-  let next = product.precioVenta, percent = null;
-  if (action === 'recommended') { percent = Math.max(0, number($('#recommendPercent').value)); next = suggestedPrice(product.costoPromedio, percent); }
-  if (action === 'manual') { next = number($('#manualRecommendedPrice').value); if (next <= 0) return showToast('Ingresá un precio manual válido', 'error'); percent = product.costoPromedio ? (next / product.costoPromedio - 1) * 100 : null; }
-  product.price = product.precioVenta = next;
-  if (percent !== null) product.porcentajeRecargoPredeterminado = percent;
-  historyEntry.precioVentaNuevo = next; historyEntry.porcentajeAplicado = percent;
-  historyEntry.motivo = action === 'later' ? 'Precio pendiente de actualización' : action === 'keep' ? 'Se mantuvo el precio actual' : action === 'manual' ? 'Precio manual confirmado' : 'Precio recomendado confirmado';
-  save(); renderAll(); $('#priceRecommendationDialog').close(); pendingRecommendation = null;
-  showToast('Compra registrada; decisión de precio guardada');
-});
+let pendingRecommendation=null;
+function roundCommercial(value,mode=business?.rounding||'none'){return redondearPrecio(value,mode);}
+function suggestedPrice(cost,percent,calculation='recargo',rounding=business?.rounding||'none'){return redondearPrecio(calculateSuggestedPrice(cost,percent,calculation),rounding);}
+function openPriceRecommendation(product,historyEntry){pendingRecommendation={product,historyEntry};$('#recommendPercent').value=historyEntry.porcentaje;$('#recommendCalculation').value=historyEntry.tipoCalculo;$('#recommendRounding').value=historyEntry.tipoRedondeo;$('#manualRecommendedPrice').value='';$('#saveProductDefault').checked=false;renderRecommendation();$('#priceRecommendationDialog').showModal();}
+function renderRecommendation(){if(!pendingRecommendation)return;const {product:p,historyEntry:h}=pendingRecommendation,percent=number($('#recommendPercent').value),calculation=$('#recommendCalculation').value,rounding=$('#recommendRounding').value,raw=calculateSuggestedPrice(p.costoPromedio,percent,calculation),suggested=redondearPrecio(raw,rounding),profit=suggested-p.costoPromedio,margin=suggested?profit/suggested*100:0,invalid=!Number.isFinite(raw);
+  $('#recommendSummary').innerHTML=[['Último costo',money(p.ultimoCostoCompra)],['Costo promedio anterior',money(h.costoPromedioAnterior)],['Nuevo costo promedio',money(p.costoPromedio)],['Precio actual',money(p.precioVenta)],['Porcentaje',`${percent}%`],['Tipo',calculation==='margen'?'Margen':'Recargo'],['Sin redondear',invalid?'Inválido':money(raw)],['Sugerido redondeado',invalid?'Inválido':money(suggested)],['Ganancia/u.',invalid?'—':money(profit)],['Rentabilidad',invalid?'—':`${margin.toFixed(2)}%`]].map(([l,v])=>`<div><span>${l}</span><strong>${v}</strong></div>`).join('');
+  $('#recommendHelp').textContent=calculation==='margen'?'Margen: porcentaje de ganancia contenido dentro del precio final.':'Recargo: porcentaje agregado al costo.';$('#recommendedValue').textContent=invalid?'Porcentaje inválido':money(suggested);$('#profitWarning').hidden=!invalid;$('#profitWarning').className='profit-warning danger';$('#profitWarning').textContent='El margen sobre venta debe ser menor que 100 %.';$('#quickRecommendations').innerHTML=[20,25,30,40,50].map(x=>`<button type="button" data-quick-percent="${x}"><b>${x}%</b><span>${money(suggestedPrice(p.costoPromedio,x,calculation,rounding))}</span></button>`).join('');}
+['recommendPercent','recommendCalculation','recommendRounding'].forEach(id=>$(`#${id}`).addEventListener('input',renderRecommendation));
+$('#quickRecommendations').addEventListener('click',e=>{const b=e.target.closest('[data-quick-percent]');if(b){$('#recommendPercent').value=b.dataset.quickPercent;renderRecommendation();}});
+$('#priceRecommendationForm').addEventListener('submit',e=>{e.preventDefault();if(!pendingRecommendation)return;const action=e.submitter?.value||'later',{product,historyEntry}=pendingRecommendation,percent=number($('#recommendPercent').value),calculation=$('#recommendCalculation').value,rounding=$('#recommendRounding').value;let next=product.precioVenta;if(calculation==='margen'&&percent>=100)return showToast('El margen debe ser menor que 100 %','error');if(action==='recommended')next=suggestedPrice(product.costoPromedio,percent,calculation,rounding);if(action==='manual'){next=number($('#manualRecommendedPrice').value);if(next<=0)return showToast('Ingresá un precio manual válido','error');}if(['recommended','manual'].includes(action))product.price=product.precioVenta=next;if($('#saveProductDefault').checked){product.porcentajeRentabilidadPredeterminado=percent;product.tipoRentabilidadPredeterminado=calculation;product.tipoRedondeoPredeterminado=rounding;}historyEntry.precioVentaAplicado=next;historyEntry.porcentaje=percent;historyEntry.tipoCalculo=calculation;historyEntry.tipoRedondeo=rounding;historyEntry.motivo=action==='later'?'Precio pendiente de actualización':action==='keep'?'Se mantuvo el precio actual':action==='manual'?'Precio manual confirmado':'Precio sugerido confirmado';save();renderAll();$('#priceRecommendationDialog').close();pendingRecommendation=null;showToast('Compra registrada; decisión de precio guardada');});
 
 /* ---------------------------------------------------------------------
    Actualización masiva de precios (vista previa en memoria)
@@ -708,7 +733,7 @@ const loadObject = (key, fallback) => { try { return { ...fallback, ...(JSON.par
 let suppliers = load(BUSINESS_KEYS.suppliers, []);
 if (!suppliers.length && purchases.length) suppliers = [...new Set(purchases.map(p => p.supplier).filter(Boolean))].map(name => ({ id: uid(), name, company: '', phone: '', email: '', address: '', notes: 'Migrado automáticamente desde el historial de compras' }));
 let cashData = loadObject(BUSINESS_KEYS.cash, { open: false, opening: 0, openedAt: '', movements: [], sessions: [] });
-let business = loadObject(BUSINESS_KEYS.settings, { name: 'Tu Esquina', currency: 'ARS', color: '#551128', goal: 100000, taxes: 'included', vat: 21, user: 'Administrador', minimumMargin: 20, rounding: '50' });
+let business = loadObject(BUSINESS_KEYS.settings, { name: 'Tu Esquina', currency: 'ARS', color: '#551128', goal: 100000, taxes: 'included', vat: 21, user: 'Administrador', minimumMargin: 20, generalMargin: 30, categoryMargins: {}, rounding: '50' });
 const legacySave = save;
 save = function saveBusinessData() {
   legacySave();
@@ -769,13 +794,13 @@ function barsHtml(entries) { const max=Math.max(...entries.map(x=>x[1]),1); retu
 function drawChart(id, values, colors=['#551128','#d3a72c']) { const c=$(`#${id}`); if(!c)return; const ctx=c.getContext('2d'), w=c.clientWidth||500, h=220, d=devicePixelRatio||1; c.width=w*d;c.height=h*d;ctx.scale(d,d);ctx.clearRect(0,0,w,h);const max=Math.max(...values.flatMap(v=>v.values),1);values.forEach((set,si)=>set.values.forEach((v,i)=>{const bw=(w-48)/set.values.length/values.length,x=32+i*(w-48)/set.values.length+si*bw,y=h-28-(v/max)*(h-55);ctx.fillStyle=colors[si];ctx.beginPath();ctx.roundRect(x,y,bw-4,h-28-y,4);ctx.fill();})); }
 function renderReports() { const revenue=sales.reduce((a,s)=>a+s.total,0), units=Object.values(unitsSold()).reduce((a,n)=>a+n,0); $('#reportMetrics').innerHTML=metric('INGRESOS',money(revenue))+metric('VENTAS',sales.length)+metric('UNIDADES',units)+metric('GANANCIA EST.',money(estimatedProfit())); const payments={};sales.forEach(s=>payments[s.paymentMethod]=(payments[s.paymentMethod]||0)+s.total);$('#paymentReport').innerHTML=barsHtml(Object.entries(payments));const cats={};sales.forEach(s=>s.items.forEach(i=>{const p=products.find(x=>x.id===i.id);cats[p?.category||'General']=(cats[p?.category||'General']||0)+i.price*i.quantity;}));$('#categoryReport').innerHTML=barsHtml(Object.entries(cats));$('#stockReport').innerHTML=`<div class="stat-list"><div><span>Stock bajo</span><b>${products.filter(p=>p.stock<=p.minStock).length}</b></div><div><span>Sin stock</span><b>${products.filter(p=>!p.stock).length}</b></div><div><span>Vencidos</span><b>${products.filter(p=>expirationState(p)==='expired').length}</b></div><div><span>Próximos</span><b>${products.filter(p=>['urgent','soon'].includes(expirationState(p))).length}</b></div></div>`;const days=[...Array(7)].map((_,i)=>{const d=today();d.setDate(d.getDate()-6+i);return daySales(d).reduce((a,s)=>a+s.total,0)});requestAnimationFrame(()=>drawChart('reportChart',[{values:days}])); }
 function renderFinance() { const daily=daySales().reduce((a,s)=>a+s.total,0), now=new Date(), monthly=sales.filter(s=>{const d=new Date(s.date);return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear()});const monthTotal=monthly.reduce((a,s)=>a+s.total,0),cost=monthly.reduce((a,s)=>a+s.items.reduce((n,i)=>n+productCost(i.id)*i.quantity,0),0),profit=estimatedProfit(monthly);$('#financeMetrics').innerHTML=metric('VENTAS DEL DÍA',money(daily))+metric('VENTAS DEL MES',money(monthTotal))+metric('GANANCIA EST.',money(profit))+metric('COSTO MERCADERÍA',money(cost))+metric('MARGEN',`${monthTotal?Math.round(profit/monthTotal*100):0}%`);const sold=unitsSold(),rank=products.map(p=>[p.name,(p.price-productCost(p.id))*(sold[p.id]||0)]).sort((a,b)=>b[1]-a[1]);$('#profitableProducts').innerHTML=barsHtml(rank.slice(0,5));$('#unprofitableProducts').innerHTML=barsHtml(rank.slice(-5).reverse());requestAnimationFrame(()=>drawChart('financeChart',[{values:[monthTotal]},{values:[cost]}])); }
-function renderBusiness() { applyBusinessTheme(); renderSuppliers(); renderCash(); renderReports(); renderFinance(); $('#settingBusinessName').value=business.name;$('#settingCurrency').value=business.currency;$('#settingColor').value=business.color;$('#settingGoal').value=business.goal;$('#settingTaxes').value=business.taxes;$('#settingVat').value=business.vat;$('#settingMinimumMargin').value=business.minimumMargin;$('#settingRounding').value=business.rounding; }
+function renderBusiness() { applyBusinessTheme(); renderSuppliers(); renderCash(); renderReports(); renderFinance(); $('#settingBusinessName').value=business.name;$('#settingCurrency').value=business.currency;$('#settingColor').value=business.color;$('#settingGoal').value=business.goal;$('#settingTaxes').value=business.taxes;$('#settingVat').value=business.vat;$('#settingMinimumMargin').value=business.minimumMargin;$('#settingGeneralMargin').value=business.generalMargin ?? 30;$('#settingRounding').value=business.rounding; }
 const baseRenderAll=renderAll; renderAll=function renderEverything(){baseRenderAll();renderBusiness();};
 
 $('#addSupplier').addEventListener('click',()=>{const name=prompt('Nombre del proveedor:');if(!name)return;suppliers.push({id:uid(),name,company:prompt('Empresa:')||'',phone:prompt('Teléfono:')||'',email:prompt('Email:')||'',address:prompt('Dirección:')||'',notes:prompt('Observaciones:')||''});save();renderSuppliers();showToast('Proveedor agregado');});
 document.addEventListener('click',e=>{const del=e.target.closest('[data-supplier-delete]');if(del&&confirm('¿Eliminar este proveedor?')){suppliers=suppliers.filter(s=>s.id!==del.dataset.supplierDelete);save();renderSuppliers();}const cash=e.target.closest('[data-cash-action]');if(cash) handleCash(cash.dataset.cashAction);});
 function handleCash(action){if(action==='open'||action==='toggle'&&!cashData.open){const opening=number(prompt('Caja inicial:',cashData.opening||0));cashData.open=true;cashData.opening=opening;cashData.openedAt=new Date().toISOString();showToast('Caja abierta');}else if(action==='close'||action==='toggle'){const total=number(cashData.opening)+daySales().reduce((a,s)=>a+s.total,0)+cashData.movements.reduce((a,m)=>a+m.amount,0);cashData.sessions.unshift({openedAt:cashData.openedAt,closedAt:new Date().toISOString(),opening:cashData.opening,total});cashData.open=false;showToast('Caja cerrada');}else if(action==='movement'){if(!cashData.open)return showToast('Primero debés abrir la caja','error');const amount=number(prompt('Monto (negativo para egreso):'));if(!amount)return;cashData.movements.unshift({id:uid(),date:new Date().toISOString(),amount,note:prompt('Concepto:')||'Movimiento manual'});}save();renderCash();renderDashboard();}
-$('#businessSettings').addEventListener('submit',e=>{e.preventDefault();business={...business,name:$('#settingBusinessName').value.trim(),currency:$('#settingCurrency').value,color:$('#settingColor').value,goal:number($('#settingGoal').value),taxes:$('#settingTaxes').value,vat:number($('#settingVat').value),minimumMargin:Math.max(0,number($('#settingMinimumMargin').value)),rounding:$('#settingRounding').value};save();renderAll();showToast('Configuración guardada');});
+$('#businessSettings').addEventListener('submit',e=>{e.preventDefault();business={...business,name:$('#settingBusinessName').value.trim(),currency:$('#settingCurrency').value,color:$('#settingColor').value,goal:number($('#settingGoal').value),taxes:$('#settingTaxes').value,vat:number($('#settingVat').value),minimumMargin:Math.max(0,number($('#settingMinimumMargin').value)),generalMargin:Math.max(0,number($('#settingGeneralMargin').value)),rounding:$('#settingRounding').value};save();renderAll();showToast('Configuración guardada');});
 document.querySelector('.settings-actions').addEventListener('click',e=>{const a=e.target.closest('[data-settings-action]')?.dataset.settingsAction;if(a==='backup')$('#exportBackup').click();if(a==='restore')$('#importBackup').click();if(a==='inventory')$('#exportProductsCsv').click();if(a==='sales')exportSalesCsv();if(a==='clear')$('#clearAllData').click();});
 $('#topNewPurchase').addEventListener('click',()=>openPurchaseDialog());$('#topNewProduct').addEventListener('click',()=>openProductDialog());$('#topBackup').addEventListener('click',()=>$('#exportBackup').click());$('#globalSearch').addEventListener('focus',openCommandPalette);
 $('#notificationButton').addEventListener('click',()=>{const notices=[];products.filter(p=>!p.stock).forEach(p=>notices.push(`${p.name}: sin stock`));products.filter(p=>expirationState(p)==='expired').forEach(p=>notices.push(`${p.name}: vencido`));if(cashData.open)notices.push('La caja continúa abierta');alert(notices.length?notices.join('\n'):'No hay notificaciones pendientes.');});
