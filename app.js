@@ -441,8 +441,10 @@ $('#completeSale').addEventListener('click', () => {
   if (cart.some(i => i.quantity > products.find(p => p.id === i.id).stock)) return showToast('El stock cambió. Revisá la venta.', 'error');
   /* El stock se descuenta sólo tras todas las validaciones. */
   cart.forEach(i => products.find(p => p.id === i.id).stock -= i.quantity);
-  const sale = { id: uid(), date: new Date().toISOString(), items: structuredClone(cart), subtotal: totals.subtotal, adjustmentType: totals.type, adjustmentPercent: totals.percent, adjustmentAmount: totals.amount, shippingAmount: totals.shippingAmount, total: totals.total, paymentMethod: $('#paymentMethod').value };
+  const saleItems = cart.map(i => { const product = products.find(p => p.id === i.id); return { ...structuredClone(i), productoId: i.id, cantidad: i.quantity, precioNormal: i.price, precioAplicado: i.promotionalUnitPrice ?? i.price, descuentoPromocional: i.promotionalDiscount || 0, promocionId: i.promotion?.id || null, promocionNombre: i.promotion?.name || '', costoPromedioAlVender: product?.costoPromedio || 0, gananciaEstimada: ((i.promotionalUnitPrice ?? i.price) - (product?.costoPromedio || 0)) * i.quantity }; });
+  const sale = { id: uid(), date: new Date().toISOString(), items: saleItems, subtotalNormal: totals.normalSubtotal ?? totals.subtotal, descuentosPromocionales: totals.promotionDiscount || 0, subtotal: totals.subtotal, adjustmentType: totals.type, adjustmentPercent: totals.percent, adjustmentAmount: totals.amount, bonificacionFinanciera: totals.amount < 0 ? Math.abs(totals.amount) : 0, recargoFinanciero: totals.amount > 0 ? totals.amount : 0, shippingAmount: totals.shippingAmount, total: totals.total, paymentMethod: $('#paymentMethod').value, metodoPago: $('#paymentMethod').value };
   sales.unshift(sale);
+  if (typeof registrarUsoPromociones === 'function') registrarUsoPromociones(saleItems);
   cart = []; $('#paymentMethod').value = ''; $('#adjustmentType').value = 'none'; $('#adjustmentPercent').value = 0;
   $('#shippingEnabled').checked = false; $('#shippingAmount').value = 0;
   save(); renderAll();
@@ -530,7 +532,7 @@ $('#purchaseForm').addEventListener('submit', event => {
   const stockAnterior=product.stock, costoAnterior=product.costoPromedio, stockNuevo=stockAnterior+quantity, nuevoCostoPromedio=calculateAverageCost(stockAnterior,costoAnterior,quantity,unitCost);
   if (!Number.isFinite(nuevoCostoPromedio)) return showToast('No se pudo calcular el costo promedio', 'error');
   const raw=calculateSuggestedPrice(nuevoCostoPromedio,percent,calculation), suggested=redondearPrecio(raw,rounding), precioVentaAnterior=product.precioVenta, expiration=$('#purchaseExpiration').value, purchaseId=uid(), supplier=$('#supplierName').value.trim();
-  product.stock=stockNuevo; product.ultimoCostoCompra=unitCost; product.costoPromedio=nuevoCostoPromedio; product.fechaUltimaCompra=$('#purchaseDate').value; product.fechaModificacion=new Date().toISOString();
+  const ultimoCostoAnterior = product.ultimoCostoCompra; product.stock=stockNuevo; product.ultimoCostoCompra=unitCost; product.costoPromedio=nuevoCostoPromedio; product.fechaUltimaCompra=$('#purchaseDate').value; product.fechaModificacion=new Date().toISOString(); product.requiereRevisionPrecio = unitCost > ultimoCostoAnterior || product.precioVenta < nuevoCostoPromedio || (product.precioVenta > 0 && (product.precioVenta - nuevoCostoPromedio) / product.precioVenta * 100 < configuredMinimumMargin());
   if(expiration){product.batches.push({id:uid(),quantity,expiration,purchaseDate:$('#purchaseDate').value,lote:$('#purchaseBatch').value.trim()});if(!product.expiration||localDate(expiration)<localDate(product.expiration)) product.expiration=product.fechaVencimiento=expiration;}
   const item={productoId:product.id,productoIdLegacy:product.id,cantidad:quantity,costoUnitario:unitCost,subtotal:quantity*unitCost,costoPromedioAnterior:costoAnterior,nuevoCostoPromedio,precioVentaAnterior,precioVentaSugerido:suggested,margenConfigurado:percent,tipoCalculo:calculation,tipoRedondeo:rounding,fechaVencimiento:expiration,lote:$('#purchaseBatch').value.trim()};
   purchases.unshift({id:purchaseId,fecha:$('#purchaseDate').value,date:$('#purchaseDate').value,proveedorId:normalizeText(supplier),nombreProveedor:supplier,supplier,productos:[item],totalCompra:quantity*unitCost,productId:product.id,productName:product.name,brand:product.brand,quantity,content:product.content,unit:product.unit,unitCost,totalCost:quantity*unitCost,expiration,comprobante:$('#purchaseReceipt').value.trim(),notes:$('#purchaseNotes').value.trim(),...item});
@@ -577,7 +579,8 @@ function openReceipt(sale) {
   if (!sale) return;
   const html = `
     <div class="receipt-head"><strong>TU ESQUINA</strong><small>${formatDate(sale.date, true)}</small><small>Comprobante no fiscal</small></div>
-    ${sale.items.map(i => `<div class="receipt-row"><span>${escapeHtml(i.name)} × ${i.quantity}</span><span>${money(i.price * i.quantity)}</span></div>`).join('')}
+    ${sale.items.map(i => `<div class="receipt-row"><span>${escapeHtml(i.name)} × ${i.quantity}${i.promocionNombre ? `<small>${escapeHtml(i.promocionNombre)}</small>` : ''}</span><span>${money((i.precioAplicado ?? i.price) * i.quantity)}</span></div>`).join('')}
+    ${sale.descuentosPromocionales ? `<div class="receipt-row"><span>Descuentos promocionales</span><span>-${money(sale.descuentosPromocionales)}</span></div>` : ''}
     <div class="receipt-row" style="margin-top:8px"><span>Subtotal</span><span>${money(sale.subtotal)}</span></div>
     ${sale.adjustmentType !== 'none' ? `<div class="receipt-row"><span>${sale.adjustmentType === 'discount' ? 'Bonificación' : 'Recargo'} (${sale.adjustmentPercent}%)</span><span>${sale.adjustmentAmount > 0 ? '+' : ''}${money(sale.adjustmentAmount)}</span></div>` : ''}
     ${sale.shippingAmount ? `<div class="receipt-row"><span>Envío</span><span>${money(sale.shippingAmount)}</span></div>` : ''}
