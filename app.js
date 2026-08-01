@@ -236,10 +236,13 @@ function saleTotals() {
   return { subtotal, type, percent, amount, shippingEnabled, shippingAmount, valid: valid && shippingValid, total: Math.max(0, subtotal + amount + shippingAmount) };
 }
 
-// Los pagos que no son en efectivo (tarjeta, QR, transferencia) requieren dejar constancia de un recargo o bonificación.
+// Solo tarjeta y QR requieren registrar recargo o bonificación.
+// Efectivo y transferencia no requieren ajuste.
 function paymentRequiresAdjustment() {
   const method = $('#paymentMethod').value;
-  return Boolean(method) && method !== 'Efectivo';
+  const methodsWithoutAdjustment = ['Efectivo', 'Transferencia'];
+
+  return Boolean(method) && !methodsWithoutAdjustment.includes(method);
 }
 function renderCart() {
   const count = cart.reduce((s, i) => s + i.quantity, 0);
