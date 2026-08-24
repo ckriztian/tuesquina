@@ -176,6 +176,7 @@
         <h3>Copia de seguridad</h3>
         <button type="button" class="secondary-button full" id="exportBackup">⇩ Descargar copia de seguridad (.json)</button>
         <button type="button" class="secondary-button full" id="importBackup">⇧ Restaurar copia de seguridad</button>
+        <button type="button" class="secondary-button full" id="exportEmergency" hidden>⚠ Exportar datos dañados para recuperación</button>
         <input type="file" id="importBackupFile" accept="application/json" hidden>
       </div>
 
@@ -218,6 +219,7 @@
   <dialog id="commercialDialog" class="commercial-dialog"><form id="commercialForm"><div class="dialog-head"><div><p class="eyebrow" id="commercialEyebrow">GESTIÓN COMERCIAL</p><h2 id="commercialTitle"></h2></div><button type="button" class="close-button" data-close="commercialDialog">×</button></div><div id="commercialBody"></div><div class="dialog-actions"><button type="button" class="secondary-button" data-close="commercialDialog">Cancelar</button><button class="primary-button compact" id="commercialSubmit">GUARDAR</button></div></form></dialog>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="storage.js"></script>
   <script src="app.js"></script>
   <script src="pricing.js"></script>
 </body></html>
