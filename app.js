@@ -248,8 +248,8 @@ function paymentRequiresAdjustment() {
   return Boolean(method) && !methodsWithoutAdjustment.includes(method);
 }
 function renderCart() {
-  const count = cart.reduce((s, i) => s + i.quantity, 0);
-  $('#cartCount').textContent = `${count} ${count === 1 ? 'ITEM' : 'ITEMS'}`;
+  const count = cart.reduce((s, i) => s + i.quantity, 0), productCount = cart.length;
+  $('#cartCount').textContent = `${count} ${count === 1 ? 'unidad' : 'unidades'} · ${productCount} ${productCount === 1 ? 'producto' : 'productos'}`;
   $('#cartItems').innerHTML = cart.length
     ? cart.map(i => `<div class="cart-item"><div><h3>${escapeHtml(i.name)}</h3><small>${escapeHtml(i.brand)} · ${escapeHtml(i.presentation)} · ${money(i.price)} c/u</small><div class="quantity"><button data-minus="${i.id}">−</button><strong>${i.quantity}</strong><button data-plus="${i.id}">＋</button><button data-remove="${i.id}" aria-label="Eliminar">×</button></div></div><strong class="num">${money(i.price * i.quantity)}</strong></div>`).join('')
     : '<div class="empty-state"><span>◇</span><strong>Tu venta está vacía</strong><small>Tocá un producto para agregarlo.</small></div>';
@@ -273,8 +273,10 @@ function renderCart() {
 function addToCart(id) {
   const p = products.find(x => x.id === id), item = cart.find(x => x.id === id), qty = item?.quantity || 0;
   if (!p || qty >= p.stock) return showToast('No hay más unidades disponibles', 'error');
+  const addedProduct = !item;
   if (item) item.quantity++; else cart.push({ id: p.id, name: p.name, brand: p.brand, presentation: presentation(p), price: p.price, quantity: 1 });
   renderCart();
+  if (addedProduct) requestAnimationFrame(() => { const list = $('#cartItems'); list.scrollTop = list.scrollHeight; });
 }
 
 /* ---------------------------------------------------------------------
