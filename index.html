@@ -87,16 +87,20 @@
             <div class="cart-title"><div><p class="eyebrow">VENTA ACTUAL</p><h2>Detalle</h2></div><span class="item-count" id="cartCount">0 ITEMS</span></div>
             <div class="cart-items" id="cartItems"></div>
             <div class="cart-summary">
-              <div><span>Subtotal</span><strong class="num" id="subtotal">$ 0,00</strong></div>
-              <div class="adjustment" id="adjustmentRow"><label>Ajuste<select id="adjustmentType"><option value="none">Sin modificación</option><option value="discount">Bonificación</option><option value="surcharge">Recargo</option></select></label><label>Porcentaje<input id="adjustmentPercent" type="number" min="0" max="100" step="0.01" value="0"></label></div>
-              <p class="adjustment-note" id="adjustmentNote">Este medio de pago requiere aplicar una bonificación o un recargo.</p>
-              <div><span id="adjustmentLabel">Ajuste (0%)</span><strong class="num" id="adjustmentAmount">$ 0,00</strong></div>
-              <label class="shipping-toggle"><input type="checkbox" id="shippingEnabled"><span>Agregar envío</span></label>
-              <div class="shipping-amount-row" id="shippingAmountRow" hidden><label>Monto de envío<input id="shippingAmount" type="number" min="0" step="0.01" value="0"></label></div>
-              <div id="shippingSummaryRow" hidden><span>Envío</span><strong class="num" id="shippingDisplay">$ 0,00</strong></div>
-              <div class="total-row"><span>Total final</span><strong class="num" id="total">$ 0,00</strong></div>
-              <label class="payment-label">Método de pago<select id="paymentMethod" required><option value="">Seleccionar…</option><option>Efectivo</option><option>Tarjeta de débito</option><option>Tarjeta de crédito</option><option>QR</option><option>Transferencia</option></select></label>
-              <button class="primary-button" id="completeSale">COBRAR <span>→</span></button>
+              <div class="cart-subtotal"><span>Subtotal</span><strong class="num" id="subtotal">$ 0,00</strong></div>
+              <div class="cart-options">
+                <div class="adjustment" id="adjustmentRow"><label>Ajuste<select id="adjustmentType"><option value="none">Sin modificación</option><option value="discount">Bonificación</option><option value="surcharge">Recargo</option></select></label><label>Porcentaje<input id="adjustmentPercent" type="number" min="0" max="100" step="0.01" value="0"></label></div>
+                <p class="adjustment-note" id="adjustmentNote">Este medio de pago requiere aplicar una bonificación o un recargo.</p>
+                <div><span id="adjustmentLabel">Ajuste (0%)</span><strong class="num" id="adjustmentAmount">$ 0,00</strong></div>
+                <label class="shipping-toggle"><input type="checkbox" id="shippingEnabled"><span>Agregar envío</span></label>
+                <div class="shipping-amount-row" id="shippingAmountRow" hidden><label>Monto de envío<input id="shippingAmount" type="number" min="0" step="0.01" value="0"></label></div>
+                <div id="shippingSummaryRow" hidden><span>Envío</span><strong class="num" id="shippingDisplay">$ 0,00</strong></div>
+              </div>
+              <div class="cart-checkout">
+                <div class="total-row"><span>Total final</span><strong class="num" id="total">$ 0,00</strong></div>
+                <label class="payment-label">Método de pago<select id="paymentMethod" required><option value="">Seleccionar…</option><option>Efectivo</option><option>Tarjeta de débito</option><option>Tarjeta de crédito</option><option>QR</option><option>Transferencia</option></select></label>
+                <button class="primary-button" id="completeSale">COBRAR <span>→</span></button>
+              </div>
             </div>
           </aside>
         </div>
@@ -176,6 +180,7 @@
         <h3>Copia de seguridad</h3>
         <button type="button" class="secondary-button full" id="exportBackup">⇩ Descargar copia de seguridad (.json)</button>
         <button type="button" class="secondary-button full" id="importBackup">⇧ Restaurar copia de seguridad</button>
+        <button type="button" class="secondary-button full" id="exportEmergency" hidden>⚠ Exportar datos dañados para recuperación</button>
         <input type="file" id="importBackupFile" accept="application/json" hidden>
       </div>
 
@@ -218,6 +223,11 @@
   <dialog id="commercialDialog" class="commercial-dialog"><form id="commercialForm"><div class="dialog-head"><div><p class="eyebrow" id="commercialEyebrow">GESTIÓN COMERCIAL</p><h2 id="commercialTitle"></h2></div><button type="button" class="close-button" data-close="commercialDialog">×</button></div><div id="commercialBody"></div><div class="dialog-actions"><button type="button" class="secondary-button" data-close="commercialDialog">Cancelar</button><button class="primary-button compact" id="commercialSubmit">GUARDAR</button></div></form></dialog>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="storage.js"></script>
+  <script src="js/services/inventory-service.js"></script>
+  <script src="js/services/purchase-service.js"></script>
+  <script src="js/services/cash-service.js"></script>
+  <script src="js/services/sales-service.js"></script>
   <script src="app.js"></script>
   <script src="pricing.js"></script>
 </body></html>
