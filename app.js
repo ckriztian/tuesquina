@@ -5,7 +5,8 @@
    ya guardada en el navegador se conserva sin cambios.
    ========================================================================= */
 
-const STORAGE = { products: 'laEsquina.products', purchases: 'laEsquina.purchases', sales: 'laEsquina.sales', costHistory: 'laEsquina.costHistory', theme: 'laEsquina.theme', migration: 'laEsquina.productMigration.v4' };
+const DATA_STORE = globalThis.TuEsquinaStorage;
+const STORAGE = { ...DATA_STORE.KEYS, migration: 'laEsquina.productMigration.v4' };
 const UNITS = ['Unidad', 'Gramos', 'Kilogramos', 'Mililitros', 'Litros'];
 
 const seedProducts = [
@@ -23,8 +24,9 @@ const number = value => Number.isFinite(Number(value)) ? Number(value) : 0;
 const money = value => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 2 }).format(number(value));
 const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
 const uid = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-function configuredGeneralMargin() { try { return Math.max(0, number(JSON.parse(localStorage.getItem('laEsquina.settings'))?.generalMargin ?? 30)); } catch { return 30; } }
-function configuredRounding() { try { return JSON.parse(localStorage.getItem('laEsquina.settings'))?.rounding || '50'; } catch { return '50'; } }
+function storedSettings() { return DATA_STORE.safeRead(DATA_STORE.KEYS.settings, {}, { type: 'object' }).value; }
+function configuredGeneralMargin() { return Math.max(0, number(storedSettings().generalMargin ?? 30)); }
+function configuredRounding() { return storedSettings().rounding || '50'; }
 function normalizeText(value) { return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase().replace(/\s+/g, ' '); }
 function canonicalUnit(value) {
   const unit = normalizeText(value).replace(/\./g, '');
@@ -48,9 +50,11 @@ function presentationKey(p) { const n = normalizeContent(p.content ?? p.contenid
    Persistencia y migración: conserva las claves históricas y completa
    campos faltantes sin borrar información existente.
    --------------------------------------------------------------------- */
+let hasPersistedApplicationData = false;
 function load(key, fallback) {
-  try { const parsed = JSON.parse(localStorage.getItem(key)); return Array.isArray(parsed) ? parsed : structuredClone(fallback); }
-  catch { return structuredClone(fallback); }
+  const result = DATA_STORE.safeRead(key, fallback, { type: 'array' });
+  if (!result.missing) hasPersistedApplicationData = true;
+  return result.corrupt ? [] : result.value;
 }
 function normalizeProduct(p) {
   // Migración no destructiva: `price` sigue disponible para todas las vistas
@@ -98,13 +102,11 @@ let catalogFilter = 'all', expirationFilter = 'all', bulkCandidates = [];
 let lastDeleted = null;
 
 function save() {
-  localStorage.setItem(STORAGE.products, JSON.stringify(products));
-  localStorage.setItem(STORAGE.purchases, JSON.stringify(purchases));
-  localStorage.setItem(STORAGE.sales, JSON.stringify(sales));
-  localStorage.setItem(STORAGE.costHistory, JSON.stringify(costHistory));
+  return DATA_STORE.saveApplicationState({ products, purchases, sales, costHistory });
 }
-save();
-localStorage.setItem(STORAGE.migration, '4');
+const storedSchema = DATA_STORE.safeRead(STORAGE.schemaVersion, DATA_STORE.SCHEMA_VERSION);
+if (storedSchema.missing) DATA_STORE.safeWrite(STORAGE.schemaVersion, DATA_STORE.SCHEMA_VERSION);
+DATA_STORE.safeWrite(STORAGE.migration, '4', { raw: true });
 
 /* ---------------------------------------------------------------------
    Utilidades generales
@@ -135,21 +137,21 @@ function daysUntil(value) { const date = localDate(value); return date ? Math.ro
 function formatDate(value, withTime = false) { if (!value) return 'Sin fecha'; const date = value.includes?.('T') ? new Date(value) : localDate(value); return date.toLocaleString('es-AR', withTime ? { dateStyle: 'short', timeStyle: 'short' } : { dateStyle: 'short' }); }
 function expirationState(p) { const days = daysUntil(p.expiration); if (days === null) return 'none'; if (days < 0) return 'expired'; if (days <= 7) return 'urgent'; if (days <= 30) return 'soon'; return 'safe'; }
 function stockState(p) { return p.stock === 0 ? 'empty' : p.stock <= p.minStock ? 'low' : 'ok'; }
-function configuredMinimumMargin() { try { return number(JSON.parse(localStorage.getItem('laEsquina.settings'))?.minimumMargin ?? 20); } catch { return 20; } }
+function configuredMinimumMargin() { return number(storedSettings().minimumMargin ?? 20); }
 function metric(label, value, detail = '', kind = '') { return `<div class="metric ${kind}"><span>${label}</span><strong>${value}</strong>${detail ? `<small>${detail}</small>` : ''}</div>`; }
 
 /* ---------------------------------------------------------------------
    Tema (claro / oscuro / sistema)
    --------------------------------------------------------------------- */
 const systemDark = window.matchMedia('(prefers-color-scheme: dark)');
-function currentThemePref() { return localStorage.getItem(STORAGE.theme) || 'system'; }
+function currentThemePref() { return DATA_STORE.safeRead(STORAGE.theme, 'system', { raw: true }).value; }
 function applyTheme(pref) {
   const isDark = pref === 'dark' || (pref === 'system' && systemDark.matches);
   document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
   $('#themeToggle').textContent = isDark ? '☾' : '☀';
   $$('.theme-option').forEach(btn => btn.classList.toggle('active', btn.dataset.themeOption === pref));
 }
-function setThemePref(pref) { localStorage.setItem(STORAGE.theme, pref); applyTheme(pref); }
+function setThemePref(pref) { if (DATA_STORE.safeWrite(STORAGE.theme, pref, { raw: true })) applyTheme(pref); }
 systemDark.addEventListener('change', () => { if (currentThemePref() === 'system') applyTheme('system'); });
 applyTheme(currentThemePref());
 
@@ -600,11 +602,14 @@ $('#themeToggle').addEventListener('click', () => setThemePref(currentThemePref(
 $$('.theme-option').forEach(btn => btn.addEventListener('click', () => setThemePref(btn.dataset.themeOption)));
 
 function downloadFile(filename, content, mime) {
-  const blob = new Blob([content], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = filename; a.click();
-  URL.revokeObjectURL(url);
+  try {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+    return true;
+  } catch (error) { showToast(`No se pudo generar el archivo: ${error.message}`, 'error'); return false; }
 }
 function toCsv(rows, headers) {
   const escape = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -612,31 +617,65 @@ function toCsv(rows, headers) {
 }
 function stamp() { return new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-'); }
 
+function collectApplicationData() {
+  return {
+    products, purchases, sales, costHistory, suppliers, cash: cashData, settings: business,
+    promotions: typeof promotions === 'undefined' ? [] : promotions,
+    combos: typeof combos === 'undefined' ? [] : combos,
+    priceHistory: typeof priceHistory === 'undefined' ? [] : priceHistory,
+    commercialSettings: typeof commercialSettings === 'undefined' ? {} : commercialSettings,
+    movements: DATA_STORE.safeRead(DATA_STORE.KEYS.movements, [], { type: 'array' }).value
+  };
+}
+function applyApplicationData(data) {
+  products = data.products.map(normalizeProduct); purchases = data.purchases.map(normalizePurchase); sales = data.sales.map(normalizeSale);
+  costHistory = data.costHistory; suppliers = data.suppliers; cashData = data.cash; business = data.settings;
+  if (typeof promotions !== 'undefined') promotions = data.promotions;
+  if (typeof combos !== 'undefined') combos = data.combos;
+  if (typeof priceHistory !== 'undefined') priceHistory = data.priceHistory;
+  if (typeof commercialSettings !== 'undefined') commercialSettings = data.commercialSettings;
+  cart = [];
+}
+function downloadCompleteBackup(prefix = 'tu-esquina-backup') {
+  const backup = DATA_STORE.createBackup(collectApplicationData(), { corruptionRecovery: DATA_STORE.getCorruptionIssues() });
+  return downloadFile(`${prefix}-${stamp()}.json`, JSON.stringify(backup, null, 2), 'application/json');
+}
+function createPreOperationBackup(operation) {
+  const ok = downloadCompleteBackup(`tu-esquina-pre-${operation}`);
+  if (!ok) showToast('La operación se canceló porque no se pudo crear el backup previo.', 'error');
+  return ok;
+}
+function backupSummary(backup) {
+  const d = backup.data;
+  return [`Productos: ${d.products.length}`, `Compras: ${d.purchases.length}`, `Ventas: ${d.sales.length}`,
+    `Proveedores: ${d.suppliers.length}`, `Promociones: ${d.promotions.length}`, `Combos: ${d.combos.length}`,
+    `Historial de precios: ${d.priceHistory.length}`, `Versión: ${backup.schemaVersion}`].join('\n');
+}
+
 $('#exportBackup').addEventListener('click', () => {
-  const backup = { app: 'Tu Esquina', version: 3, exportedAt: new Date().toISOString(), products, purchases, sales, costHistory, suppliers, cash: cashData, settings: business };
-  downloadFile(`tu-esquina-backup-${stamp()}.json`, JSON.stringify(backup, null, 2), 'application/json');
-  showToast('Copia de seguridad descargada');
+  if (downloadCompleteBackup()) showToast('Copia de seguridad completa descargada');
 });
 $('#importBackup').addEventListener('click', () => $('#importBackupFile').click());
+$('#exportEmergency').addEventListener('click', () => {
+  const recovery = DATA_STORE.createEmergencyExport();
+  if (!recovery.issues.length) return showToast('No hay colecciones dañadas detectadas');
+  if (downloadFile(`tu-esquina-recuperacion-${stamp()}.json`, JSON.stringify(recovery, null, 2), 'application/json')) showToast('Datos originales exportados para recuperación');
+});
 $('#importBackupFile').addEventListener('change', event => {
   const file = event.target.files[0];
   if (!file) return;
   const reader = new FileReader();
   reader.onload = () => {
     try {
-      const data = JSON.parse(reader.result);
-      if (!Array.isArray(data.products) || !Array.isArray(data.purchases) || !Array.isArray(data.sales)) throw new Error('formato inválido');
-      if (!confirm('Esto reemplaza todos los productos, compras y ventas actuales por los del archivo. ¿Continuar?')) return;
-      products = data.products.map(normalizeProduct);
-      purchases = data.purchases.map(normalizePurchase);
-      sales = data.sales.map(normalizeSale);
-      costHistory = Array.isArray(data.costHistory) ? data.costHistory : [];
-      if (Array.isArray(data.suppliers)) { localStorage.setItem('laEsquina.suppliers', JSON.stringify(data.suppliers)); }
-      if (data.cash) { localStorage.setItem('laEsquina.cash', JSON.stringify(data.cash)); }
-      if (data.settings) { localStorage.setItem('laEsquina.settings', JSON.stringify(data.settings)); }
-      save(); renderAll(); $('#settingsDialog').close();
+      const validation = DATA_STORE.validateBackup(reader.result);
+      if (!validation.ok) throw new Error(validation.errors.join('\n'));
+      if (!confirm(`Backup válido. Se reemplazarán los datos actuales:\n\n${backupSummary(validation.backup)}\n\n¿Continuar?`)) return;
+      if (!createPreOperationBackup('restore')) return;
+      const restored = DATA_STORE.restoreApplicationState(validation.backup, applyApplicationData);
+      if (!restored.ok) throw new Error(restored.errors.join('\n'));
+      renderAll(); $('#settingsDialog').close();
       showToast('Copia de seguridad restaurada');
-    } catch { showToast('El archivo no es una copia de seguridad válida', 'error'); }
+    } catch (error) { showToast(`No se restauró ningún dato: ${error.message}`, 'error', '', null, 6500); }
     finally { event.target.value = ''; }
   };
   reader.readAsText(file);
@@ -659,12 +698,28 @@ $('#exportSalesCsv').addEventListener('click', exportSalesCsv);
 $('#exportSalesCsv2').addEventListener('click', exportSalesCsv);
 
 $('#clearAllData').addEventListener('click', () => {
-  if (!confirm('Se borrarán todos los productos, compras y ventas guardados en este navegador. Esta acción no se puede deshacer. ¿Continuar?')) return;
-  products = structuredClone(seedProducts).map(normalizeProduct);
-  purchases = []; sales = []; costHistory = []; cart = [];
-  save(); renderAll(); $('#settingsDialog').close();
-  showToast('Los datos se restablecieron');
+  if (!validarClaveConfiguracion(prompt('Vaciar la base requiere la clave de Configuración:'))) return showToast('Clave incorrecta. No se eliminó ningún dato.', 'error');
+  const modules = 'productos, compras, ventas, costos, proveedores, caja, configuración general, promociones, combos, precios y movimientos';
+  if (!confirm(`Se eliminarán: ${modules}.\n\nLa preferencia visual se conservará. Esta acción no se puede deshacer sin el backup. ¿Confirmar?`)) return;
+  if (!createPreOperationBackup('clear')) return;
+  const empty = {
+    products: [], purchases: [], sales: [], costHistory: [], suppliers: [], promotions: [], combos: [], priceHistory: [], movements: [],
+    cash: { open: false, opening: 0, openedAt: '', movements: [], sessions: [] },
+    settings: { name: 'Tu Esquina', currency: 'ARS', color: '#551128', goal: 100000, taxes: 'included', vat: 21, user: 'Administrador', minimumMargin: 20, generalMargin: 30, categoryMargins: {}, rounding: '50' },
+    commercialSettings: { generalMarkup: 30, minimumMargin: 20, targetMargin: 30, rounding: '50', discountLimit: 15, defaultPriority: 10, allowStacking: false, maxBulkWithoutAuth: 20, expirationSuggestionDays: 15, inactivityDays: 30, highStockMultiplier: 3, category: {}, brand: {}, product: {} }
+  };
+  if (!DATA_STORE.clearApplicationData(empty)) return showToast('No se pudo vaciar la base; los datos actuales se conservaron.', 'error');
+  applyApplicationData(empty); renderAll(); $('#settingsDialog').close();
+  showToast('Se vaciaron todos los módulos; el backup previo fue descargado');
 });
+
+function refreshStorageWarning() {
+  const issues = DATA_STORE.getCorruptionIssues(), button = $('#exportEmergency');
+  button.hidden = !issues.length;
+  if (issues.length) showToast(`Atención: ${issues.length} colección(es) no pudieron leerse. No fueron sobrescritas.`, 'error', '', null, 7000);
+}
+DATA_STORE.setErrorHandler((message) => { showToast(`${message} Generá un backup antes de cerrar.`, 'error', '', null, 7000); refreshStorageWarning(); });
+refreshStorageWarning();
 
 /* ---------------------------------------------------------------------
    Paleta de comandos (Ctrl/Cmd + K)
@@ -735,17 +790,13 @@ renderAll();
    y se inicializan sin modificar las estructuras históricas.
    ===================================================================== */
 const BUSINESS_KEYS = { suppliers: 'laEsquina.suppliers', cash: 'laEsquina.cash', settings: 'laEsquina.settings' };
-const loadObject = (key, fallback) => { try { return { ...fallback, ...(JSON.parse(localStorage.getItem(key)) || {}) }; } catch { return { ...fallback }; } };
+const loadObject = (key, fallback) => ({ ...fallback, ...DATA_STORE.safeRead(key, fallback, { type: 'object' }).value });
 let suppliers = load(BUSINESS_KEYS.suppliers, []);
 if (!suppliers.length && purchases.length) suppliers = [...new Set(purchases.map(p => p.supplier).filter(Boolean))].map(name => ({ id: uid(), name, company: '', phone: '', email: '', address: '', notes: 'Migrado automáticamente desde el historial de compras' }));
 let cashData = loadObject(BUSINESS_KEYS.cash, { open: false, opening: 0, openedAt: '', movements: [], sessions: [] });
 let business = loadObject(BUSINESS_KEYS.settings, { name: 'Tu Esquina', currency: 'ARS', color: '#551128', goal: 100000, taxes: 'included', vat: 21, user: 'Administrador', minimumMargin: 20, generalMargin: 30, categoryMargins: {}, rounding: '50' });
-const legacySave = save;
 save = function saveBusinessData() {
-  legacySave();
-  localStorage.setItem(BUSINESS_KEYS.suppliers, JSON.stringify(suppliers));
-  localStorage.setItem(BUSINESS_KEYS.cash, JSON.stringify(cashData));
-  localStorage.setItem(BUSINESS_KEYS.settings, JSON.stringify(business));
+  return DATA_STORE.saveApplicationState({ products, purchases, sales, costHistory, suppliers, cash: cashData, settings: business });
 };
 
 function daySales(date = new Date()) { return sales.filter(s => new Date(s.date).toDateString() === date.toDateString()); }
