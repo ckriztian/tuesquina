@@ -11,15 +11,15 @@ const COMMERCIAL_DEFAULTS = {
   expirationSuggestionDays: 15, inactivityDays: 30, highStockMultiplier: 3,
   category: {}, brand: {}, product: {}
 };
-function loadCommercialArray(key) { try { const value = JSON.parse(localStorage.getItem(key)); return Array.isArray(value) ? value : []; } catch { return []; } }
+function loadCommercialArray(key) { return DATA_STORE.safeRead(key, [], { type: 'array' }).value; }
 function cargarPromociones() { return loadCommercialArray(COMMERCIAL_KEYS.promotions); }
-function guardarPromociones(value = promotions) { localStorage.setItem(COMMERCIAL_KEYS.promotions, JSON.stringify(value)); }
+function guardarPromociones(value = promotions) { return DATA_STORE.safeWrite(COMMERCIAL_KEYS.promotions, value); }
 function cargarCombos() { return loadCommercialArray(COMMERCIAL_KEYS.combos); }
-function guardarCombos(value = combos) { localStorage.setItem(COMMERCIAL_KEYS.combos, JSON.stringify(value)); }
+function guardarCombos(value = combos) { return DATA_STORE.safeWrite(COMMERCIAL_KEYS.combos, value); }
 function cargarHistorialPrecios() { return loadCommercialArray(COMMERCIAL_KEYS.priceHistory); }
-function guardarHistorialPrecios(value = priceHistory) { localStorage.setItem(COMMERCIAL_KEYS.priceHistory, JSON.stringify(value)); }
-function cargarConfiguracionComercial() { try { return { ...COMMERCIAL_DEFAULTS, ...(JSON.parse(localStorage.getItem(COMMERCIAL_KEYS.commercial)) || {}) }; } catch { return structuredClone(COMMERCIAL_DEFAULTS); } }
-function guardarConfiguracionComercial(value = commercialSettings) { localStorage.setItem(COMMERCIAL_KEYS.commercial, JSON.stringify(value)); }
+function guardarHistorialPrecios(value = priceHistory) { return DATA_STORE.safeWrite(COMMERCIAL_KEYS.priceHistory, value); }
+function cargarConfiguracionComercial() { return { ...COMMERCIAL_DEFAULTS, ...DATA_STORE.safeRead(COMMERCIAL_KEYS.commercial, COMMERCIAL_DEFAULTS, { type: 'object' }).value }; }
+function guardarConfiguracionComercial(value = commercialSettings) { return DATA_STORE.safeWrite(COMMERCIAL_KEYS.commercial, value); }
 
 let promotions = cargarPromociones(), combos = cargarCombos(), priceHistory = cargarHistorialPrecios();
 let commercialSettings = cargarConfiguracionComercial(), pricingTab = 'summary', commercialAction = null, bulkPricePreview = [];
@@ -54,10 +54,13 @@ function migrateCommercialProducts() {
     p.price = p.precioVenta; p.name = p.nombre; p.brand = p.marca; p.category = p.categoria;
     if (JSON.stringify(p) !== before) changed = true;
   });
-  if (changed) save();
-  localStorage.setItem(COMMERCIAL_KEYS.migration, '1');
+  if (changed) {
+    if (hasPersistedApplicationData && !createPreOperationBackup('migration')) return;
+    save();
+  }
+  DATA_STORE.safeWrite(COMMERCIAL_KEYS.migration, '1', { raw: true });
 }
-function persistCommercial() { guardarPromociones(); guardarCombos(); guardarHistorialPrecios(); guardarConfiguracionComercial(); save(); }
+function persistCommercial() { return save(); }
 function recordPriceChange(product, oldPrice, newPrice, reason, origin = 'edición manual', extra = {}) {
   const now = new Date(), difference = newPrice - oldPrice;
   priceHistory.unshift({ id: uid(), fecha: now.toISOString().slice(0,10), hora: now.toTimeString().slice(0,8), productoId: product.id,
@@ -134,7 +137,7 @@ saleTotals = function promotionalSaleTotals(){const base=legacySaleTotals(),meth
 const legacyRenderCart=renderCart;
 renderCart=function renderPromotionalCart(){legacyRenderCart();const t=saleTotals();$('#cartItems').innerHTML=cart.length?cart.map(i=>`<div class="cart-item"><div><h3>${escapeHtml(i.name)}</h3><small>${escapeHtml(i.brand)} · ${escapeHtml(i.presentation)}</small>${i.promotion?`<span class="promotion-line"><s>${money(i.price)} c/u</s> <b>${money(i.promotionalUnitPrice)} c/u</b> · ${escapeHtml(i.promotion.name)}</span>`:`<small>${money(i.price)} c/u</small>`}<div class="quantity"><button data-minus="${i.id}">−</button><strong>${i.quantity}</strong><button data-plus="${i.id}">＋</button><button data-remove="${i.id}">×</button></div></div><strong class="num">${money(i.promotionalUnitPrice*i.quantity)}</strong></div>`).join(''):'<div class="empty-state"><span>◇</span><strong>Tu venta está vacía</strong><small>Tocá un producto para agregarlo.</small></div>';$('#subtotal').textContent=money(t.normalSubtotal);let row=$('#promotionTotalRow');if(!row){row=document.createElement('div');row.id='promotionTotalRow';$('#adjustmentRow').before(row);}row.innerHTML=`<span>Descuentos promocionales</span><strong class="num">-${money(t.promotionDiscount)}</strong>`;row.hidden=!t.promotionDiscount;$('#adjustmentAmount').textContent=`${t.amount>0?'+':''}${money(t.amount)}`;$('#total').textContent=money(t.total);};
 
-const previousSave=save;save=function saveWithCommercial(){previousSave();guardarPromociones();guardarCombos();guardarHistorialPrecios();guardarConfiguracionComercial();};
+save=function saveWithCommercial(){return DATA_STORE.saveApplicationState(collectApplicationData());};
 const previousRenderAll=renderAll;renderAll=function renderWithPricing(){previousRenderAll();renderPricing();};
 
 $('#commercialForm').addEventListener('submit',submitCommercial);
@@ -157,5 +160,5 @@ function registrarUsoPromociones(items) {
     const promotion = promotions.find(p => p.id === item.promocionId);
     if (promotion) promotion.unidadesAplicadas = finiteNonNegative(promotion.unidadesAplicadas) + item.cantidad;
   });
-  guardarPromociones();
+  save();
 }
