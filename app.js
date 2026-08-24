@@ -97,12 +97,13 @@ let products = load(STORAGE.products, seedProducts).map(normalizeProduct);
 let purchases = load(STORAGE.purchases, []).map(normalizePurchase);
 let sales = load(STORAGE.sales, []).map(normalizeSale);
 let costHistory = load(STORAGE.costHistory, []);
+let inventoryMovements = load(STORAGE.movements, []);
 let cart = [];
 let catalogFilter = 'all', expirationFilter = 'all', bulkCandidates = [];
 let lastDeleted = null;
 
 function save() {
-  return DATA_STORE.saveApplicationState({ products, purchases, sales, costHistory });
+  return DATA_STORE.saveApplicationState({ products, purchases, sales, costHistory, movements: inventoryMovements });
 }
 const storedSchema = DATA_STORE.safeRead(STORAGE.schemaVersion, DATA_STORE.SCHEMA_VERSION);
 if (storedSchema.missing) DATA_STORE.safeWrite(STORAGE.schemaVersion, DATA_STORE.SCHEMA_VERSION);
@@ -435,21 +436,19 @@ $('#shippingAmount').addEventListener('input', renderCart);
 $('#clearSale').addEventListener('click', () => { cart = []; renderCart(); showToast('Venta vaciada'); });
 
 $('#completeSale').addEventListener('click', () => {
-  if (!cart.length) return showToast('Agregá productos antes de cobrar', 'error');
-  if (!$('#paymentMethod').value) return showToast('Seleccioná un método de pago', 'error');
   const totals = saleTotals();
   if (!totals.valid) return showToast('Revisá el porcentaje de ajuste o el monto de envío', 'error');
   if (paymentRequiresAdjustment() && totals.type === 'none') return showToast('Este medio de pago requiere una bonificación o un recargo', 'error');
-  if (cart.some(i => i.quantity > products.find(p => p.id === i.id).stock)) return showToast('El stock cambió. Revisá la venta.', 'error');
-  /* El stock se descuenta sólo tras todas las validaciones. */
-  cart.forEach(i => products.find(p => p.id === i.id).stock -= i.quantity);
-  const saleItems = cart.map(i => { const product = products.find(p => p.id === i.id); return { ...structuredClone(i), productoId: i.id, cantidad: i.quantity, precioNormal: i.price, precioAplicado: i.promotionalUnitPrice ?? i.price, descuentoPromocional: i.promotionalDiscount || 0, promocionId: i.promotion?.id || null, promocionNombre: i.promotion?.name || '', costoPromedioAlVender: product?.costoPromedio || 0, gananciaEstimada: ((i.promotionalUnitPrice ?? i.price) - (product?.costoPromedio || 0)) * i.quantity }; });
-  const sale = { id: uid(), date: new Date().toISOString(), items: saleItems, subtotalNormal: totals.normalSubtotal ?? totals.subtotal, descuentosPromocionales: totals.promotionDiscount || 0, subtotal: totals.subtotal, adjustmentType: totals.type, adjustmentPercent: totals.percent, adjustmentAmount: totals.amount, bonificacionFinanciera: totals.amount < 0 ? Math.abs(totals.amount) : 0, recargoFinanciero: totals.amount > 0 ? totals.amount : 0, shippingAmount: totals.shippingAmount, total: totals.total, paymentMethod: $('#paymentMethod').value, metodoPago: $('#paymentMethod').value };
-  sales.unshift(sale);
-  if (typeof registrarUsoPromociones === 'function') registrarUsoPromociones(saleItems);
+  const result = SalesService.completeSale({ items: cart.map(item => ({ productId: item.id, quantity: item.quantity })), paymentMethod: $('#paymentMethod').value,
+    adjustmentType: totals.type, adjustmentPercent: totals.percent, shippingAmount: totals.shippingAmount, userId: business?.user },
+  { products, sales, movements: inventoryMovements, cash: cashData, promotions: typeof promotions === 'undefined' ? [] : promotions,
+    persist: save, uid, resolvePromotion: (product, quantity, method) => typeof bestPromotion === 'function' ? bestPromotion(product, quantity, method) : null,
+    presentProduct: presentation });
+  if (!result.ok) return showToast(result.message, 'error');
+  const sale = result.sale;
   cart = []; $('#paymentMethod').value = ''; $('#adjustmentType').value = 'none'; $('#adjustmentPercent').value = 0;
   $('#shippingEnabled').checked = false; $('#shippingAmount').value = 0;
-  save(); renderAll();
+  renderCart(); renderCatalog(); renderQuickSale(); renderInventory(); renderSales(); renderDashboard(); renderCash(); renderReports(); renderFinance();
   showToast('Venta cobrada e inventario actualizado', 'ok', 'Ver recibo', () => openReceipt(sale), 4500);
 });
 
@@ -464,10 +463,17 @@ $('#productForm').addEventListener('submit', event => {
   const candidate = { name, brand: $('#productBrand').value.trim() || 'Sin marca', content, unit: $('#productUnit').value };
   const duplicate = products.find(p => p.id !== id && presentationKey(p) === presentationKey(candidate));
   if (duplicate && !confirm('Ya existe un producto con el mismo nombre, marca y presentación. ¿Guardar de todos modos?')) return;
-  const previous = id ? products.find(p => p.id === id) : {};
-  const data = normalizeProduct({ ...previous, id: id || uid(), name, brand: candidate.brand, category: $('#productCategory').value.trim() || 'General', code, price, precioVenta: price, stock, minStock, content, unit: candidate.unit, expiration: $('#productExpiration').value, fechaCreacion: previous?.fechaCreacion, fechaModificacion: new Date().toISOString(), batches: previous?.batches || [] });
-  if (id) Object.assign(products.find(p => p.id === id), data); else products.push(data);
-  save(); renderAll(); $('#productDialog').close();
+  const previous = id ? products.find(p => p.id === id) : {}, previousSnapshot = id ? structuredClone(previous) : null, previousStock = number(previous?.stock);
+  const data = normalizeProduct({ ...previous, id: id || uid(), name, brand: candidate.brand, category: $('#productCategory').value.trim() || 'General', code, price, precioVenta: price, stock: id ? previousStock : stock, minStock, content, unit: candidate.unit, expiration: $('#productExpiration').value, fechaCreacion: previous?.fechaCreacion, fechaModificacion: new Date().toISOString(), batches: previous?.batches || [] });
+  if (id) {
+    Object.assign(previous, data);
+    if (stock !== previousStock) {
+      const reason = prompt('Motivo obligatorio del ajuste de stock:');
+      const result = InventoryService.adjustInventory({ productId: id, newQuantity: stock, reason, origin: 'PRODUCT_EDIT', userId: business?.user }, { products, movements: inventoryMovements, persist: save, uid });
+      if (!result.ok) { Object.keys(previous).forEach(key => delete previous[key]); Object.assign(previous, previousSnapshot); return showToast(result.message, 'error'); }
+    } else if (!save()) return showToast('No se pudo guardar el producto', 'error');
+  } else { products.push(data); if (!save()) { products.pop(); return showToast('No se pudo guardar el producto', 'error'); } }
+  renderAll(); $('#productDialog').close();
   showToast(id ? 'Producto actualizado' : 'Producto agregado');
 });
 
@@ -483,8 +489,7 @@ function productProfitDefaults(product) {
   };
 }
 function calculateAverageCost(stock, average, quantity, unitCost) {
-  if (![stock, average, quantity, unitCost].every(Number.isFinite) || stock < 0 || average < 0 || quantity <= 0 || unitCost <= 0) return NaN;
-  return !stock || !average ? unitCost : ((stock * average) + (quantity * unitCost)) / (stock + quantity);
+  return PurchaseService.calculateWeightedAverageCost({ previousStock: stock, previousAverageCost: average, purchasedQuantity: quantity, purchaseUnitCost: unitCost });
 }
 function redondearPrecio(price, mode = 'none') {
   if (!Number.isFinite(price) || price < 0) return NaN;
@@ -530,16 +535,16 @@ $('#createFromPurchase').addEventListener('click', () => { $('#purchaseDialog').
 $('#purchaseForm').addEventListener('submit', event => {
   event.preventDefault();
   const product = products.find(p => p.id === $('#purchaseProduct').value), quantity = number($('#purchaseQuantity').value), unitCost = number($('#purchaseUnitCost').value), percent = number($('#purchasePercent').value), calculation = $('#purchaseCalculation').value, rounding = $('#purchaseRounding').value;
-  if (!product || quantity <= 0 || !Number.isInteger(quantity) || unitCost <= 0 || percent < 0 || calculation === 'margen' && percent >= 100 || ![quantity, unitCost, percent].every(Number.isFinite)) return showToast('Revisá cantidad, costo, porcentaje y tipo de cálculo', 'error');
-  const stockAnterior=product.stock, costoAnterior=product.costoPromedio, stockNuevo=stockAnterior+quantity, nuevoCostoPromedio=calculateAverageCost(stockAnterior,costoAnterior,quantity,unitCost);
-  if (!Number.isFinite(nuevoCostoPromedio)) return showToast('No se pudo calcular el costo promedio', 'error');
-  const raw=calculateSuggestedPrice(nuevoCostoPromedio,percent,calculation), suggested=redondearPrecio(raw,rounding), precioVentaAnterior=product.precioVenta, expiration=$('#purchaseExpiration').value, purchaseId=uid(), supplier=$('#supplierName').value.trim();
-  const ultimoCostoAnterior = product.ultimoCostoCompra; product.stock=stockNuevo; product.ultimoCostoCompra=unitCost; product.costoPromedio=nuevoCostoPromedio; product.fechaUltimaCompra=$('#purchaseDate').value; product.fechaModificacion=new Date().toISOString(); product.requiereRevisionPrecio = unitCost > ultimoCostoAnterior || product.precioVenta < nuevoCostoPromedio || (product.precioVenta > 0 && (product.precioVenta - nuevoCostoPromedio) / product.precioVenta * 100 < configuredMinimumMargin());
-  if(expiration){product.batches.push({id:uid(),quantity,expiration,purchaseDate:$('#purchaseDate').value,lote:$('#purchaseBatch').value.trim()});if(!product.expiration||localDate(expiration)<localDate(product.expiration)) product.expiration=product.fechaVencimiento=expiration;}
-  const item={productoId:product.id,productoIdLegacy:product.id,cantidad:quantity,costoUnitario:unitCost,subtotal:quantity*unitCost,costoPromedioAnterior:costoAnterior,nuevoCostoPromedio,precioVentaAnterior,precioVentaSugerido:suggested,margenConfigurado:percent,tipoCalculo:calculation,tipoRedondeo:rounding,fechaVencimiento:expiration,lote:$('#purchaseBatch').value.trim()};
-  purchases.unshift({id:purchaseId,fecha:$('#purchaseDate').value,date:$('#purchaseDate').value,proveedorId:normalizeText(supplier),nombreProveedor:supplier,supplier,productos:[item],totalCompra:quantity*unitCost,productId:product.id,productName:product.name,brand:product.brand,quantity,content:product.content,unit:product.unit,unitCost,totalCost:quantity*unitCost,expiration,comprobante:$('#purchaseReceipt').value.trim(),notes:$('#purchaseNotes').value.trim(),...item});
-  const historyEntry={id:uid(),purchaseId,fecha:new Date().toISOString(),productoId:product.id,nombreProducto:product.name,presentacion:presentation(product),proveedor:supplier,stockAnterior,cantidadComprada:quantity,stockNuevo,costoPromedioAnterior:costoAnterior,costoCompraNuevo:unitCost,costoPromedioNuevo:nuevoCostoPromedio,precioVentaAnterior,precioVentaSugerido:suggested,precioVentaAplicado:precioVentaAnterior,porcentaje:percent,tipoCalculo:calculation,tipoRedondeo:rounding,usuario:business?.user||'Administrador',motivo:'Compra registrada; precio pendiente de confirmación'};
-  costHistory.unshift(historyEntry); save();renderAll();$('#purchaseDialog').close();openPriceRecommendation(product,historyEntry);
+  const average = product ? calculateAverageCost(product.stock, product.costoPromedio, quantity, unitCost) : NaN;
+  const suggested = Number.isFinite(average) ? redondearPrecio(calculateSuggestedPrice(average, percent, calculation), rounding) : NaN;
+  const result = PurchaseService.registerPurchase({ supplier: $('#supplierName').value.trim(), supplierId: normalizeText($('#supplierName').value), productId: product?.id,
+    quantity, unitCost, date: $('#purchaseDate').value, expiration: $('#purchaseExpiration').value, batch: $('#purchaseBatch').value.trim(),
+    receipt: $('#purchaseReceipt').value.trim(), notes: $('#purchaseNotes').value.trim(), percent, calculation, rounding, suggestedPrice: suggested,
+    presentation: product ? presentation(product) : '', userId: business?.user },
+  { products, purchases, costHistory, movements: inventoryMovements, persist: save, uid, minimumMargin: configuredMinimumMargin() });
+  if (!result.ok) return showToast(result.message, 'error');
+  renderPurchases(); renderInventory(); renderDashboard(); renderExpirations(); populateProductSelect(); renderPricing();
+  $('#purchaseDialog').close(); openPriceRecommendation(product, result.historyEntry);
 });
 let pendingRecommendation=null;
 function roundCommercial(value,mode=business?.rounding||'none'){return redondearPrecio(value,mode);}
@@ -624,7 +629,7 @@ function collectApplicationData() {
     combos: typeof combos === 'undefined' ? [] : combos,
     priceHistory: typeof priceHistory === 'undefined' ? [] : priceHistory,
     commercialSettings: typeof commercialSettings === 'undefined' ? {} : commercialSettings,
-    movements: DATA_STORE.safeRead(DATA_STORE.KEYS.movements, [], { type: 'array' }).value
+    movements: inventoryMovements
   };
 }
 function applyApplicationData(data) {
@@ -634,6 +639,7 @@ function applyApplicationData(data) {
   if (typeof combos !== 'undefined') combos = data.combos;
   if (typeof priceHistory !== 'undefined') priceHistory = data.priceHistory;
   if (typeof commercialSettings !== 'undefined') commercialSettings = data.commercialSettings;
+  inventoryMovements = data.movements || [];
   cart = [];
 }
 function downloadCompleteBackup(prefix = 'tu-esquina-backup') {
@@ -794,15 +800,16 @@ const loadObject = (key, fallback) => ({ ...fallback, ...DATA_STORE.safeRead(key
 let suppliers = load(BUSINESS_KEYS.suppliers, []);
 if (!suppliers.length && purchases.length) suppliers = [...new Set(purchases.map(p => p.supplier).filter(Boolean))].map(name => ({ id: uid(), name, company: '', phone: '', email: '', address: '', notes: 'Migrado automáticamente desde el historial de compras' }));
 let cashData = loadObject(BUSINESS_KEYS.cash, { open: false, opening: 0, openedAt: '', movements: [], sessions: [] });
+CashService.ensureCashState(cashData);
 let business = loadObject(BUSINESS_KEYS.settings, { name: 'Tu Esquina', currency: 'ARS', color: '#551128', goal: 100000, taxes: 'included', vat: 21, user: 'Administrador', minimumMargin: 20, generalMargin: 30, categoryMargins: {}, rounding: '50' });
 save = function saveBusinessData() {
-  return DATA_STORE.saveApplicationState({ products, purchases, sales, costHistory, suppliers, cash: cashData, settings: business });
+  return DATA_STORE.saveApplicationState({ products, purchases, sales, costHistory, suppliers, cash: cashData, settings: business, movements: inventoryMovements });
 };
 
 function daySales(date = new Date()) { return sales.filter(s => new Date(s.date).toDateString() === date.toDateString()); }
 function unitsSold() { const result = {}; sales.forEach(s => s.items.forEach(i => result[i.id] = (result[i.id] || 0) + number(i.quantity))); return result; }
 function productCost(id) { return products.find(p => p.id === id)?.costoPromedio || 0; }
-function estimatedProfit(list = sales) { return list.reduce((sum, s) => sum + s.items.reduce((n, i) => n + (i.price - productCost(i.id)) * i.quantity, 0), 0); }
+function estimatedProfit(list = sales) { return list.reduce((sum, sale) => sum + SalesService.historicalProfit(sale), 0); }
 function applyBusinessTheme() {
   document.documentElement.style.setProperty('--brand', business.color);
   $$('.brand-name').forEach(el => { el.childNodes[0].textContent = business.name; });
@@ -814,10 +821,10 @@ renderDashboard = function renderCommercialDashboard() {
   baseDashboard();
   const daily = daySales(), revenue = daily.reduce((a, s) => a + s.total, 0), expired = products.filter(p => expirationState(p) === 'expired').length;
   const soon = products.filter(p => ['urgent', 'soon'].includes(expirationState(p))).length, low = products.filter(p => p.stock <= p.minStock).length;
-  const cashCurrent = number(cashData.opening) + daily.filter(s => s.paymentMethod === 'Efectivo').reduce((a, s) => a + s.total, 0) + cashData.movements.filter(m => new Date(m.date).toDateString() === new Date().toDateString()).reduce((a, m) => a + m.amount, 0);
+  const cashCurrent = cashData.activeSession ? CashService.expectedCash(cashData.activeSession, sales).expectedCash : 0;
   $('#dashboardMetrics').innerHTML = [
     ['🛒','Ventas del día',money(revenue),`${daily.length} operaciones`], ['💵','Caja actual',money(cashCurrent),cashData.open ? 'Caja abierta' : 'Caja cerrada'],
-    ['📈','Ganancia estimada',money(estimatedProfit(daily)),'Según último costo'], ['🎫','Ticket promedio',money(daily.length ? revenue / daily.length : 0),'Por operación'],
+    ['📈','Ganancia estimada',money(estimatedProfit(daily)),'Según costo al vender'], ['🎫','Ticket promedio',money(daily.length ? revenue / daily.length : 0),'Por operación'],
     ['✓','Cantidad de ventas',daily.length,'Hoy'], ['📦','Productos',products.length,'Registrados'], ['⚠','Stock bajo',low,'Requieren reposición'],
     ['⛔','Vencidos',expired,'No vender'], ['📅','Próximos a vencer',soon,'Dentro de 30 días']
   ].map(([icon,label,value,detail]) => `<div class="metric kpi"><i>${icon}</i><span>${label}</span><strong>${value}</strong><small>${detail}</small></div>`).join('');
@@ -839,24 +846,27 @@ function renderSuppliers() {
   $('#supplierGrid').innerHTML = suppliers.map(s => { const history=purchases.filter(p=>p.supplier===s.name); return `<article class="supplier-card"><div class="supplier-avatar">${escapeHtml(s.name.slice(0,2).toUpperCase())}</div><div><h3>${escapeHtml(s.name)}</h3><p>${escapeHtml(s.company||'Proveedor independiente')}</p></div><dl><div><dt>Teléfono</dt><dd>${escapeHtml(s.phone||'—')}</dd></div><div><dt>Email</dt><dd>${escapeHtml(s.email||'—')}</dd></div><div><dt>Dirección</dt><dd>${escapeHtml(s.address||'—')}</dd></div><div><dt>Compras</dt><dd>${history.length} · ${money(history.reduce((a,p)=>a+p.totalCost,0))}</dd></div></dl><small>${escapeHtml(s.notes||'Sin observaciones')}</small><button class="secondary-button" data-supplier-delete="${s.id}">Eliminar</button></article>`; }).join('') || '<div class="panel empty-state"><strong>Sumá tu primer proveedor</strong><small>Centralizá contactos e historial de compras.</small></div>';
 }
 function renderCash() {
-  const daily=daySales(), saleTotal=daily.reduce((a,s)=>a+s.total,0), movements=cashData.movements.filter(m=>new Date(m.date).toDateString()===new Date().toDateString());
-  const income=movements.filter(m=>m.amount>0).reduce((a,m)=>a+m.amount,0), expenses=Math.abs(movements.filter(m=>m.amount<0).reduce((a,m)=>a+m.amount,0)), current=number(cashData.opening)+saleTotal+income-expenses;
-  $('#cashMetrics').innerHTML=metric('CAJA INICIAL',money(cashData.opening))+metric('VENTAS',money(saleTotal))+metric('INGRESOS',money(income))+metric('EGRESOS',money(expenses),'',expenses?'warning':'')+metric('CAJA ACTUAL',money(current));
+  CashService.ensureCashState(cashData); const active=cashData.activeSession, totals=active?CashService.expectedCash(active,sales):{cashSales:0,income:0,expenses:0,expectedCash:0};
+  const movements=active?.movements||[];
+  $('#cashMetrics').innerHTML=metric('CAJA INICIAL',money(active?.openingCash||0))+metric('VENTAS EFECTIVO',money(totals.cashSales))+metric('INGRESOS',money(totals.income))+metric('EGRESOS',money(totals.expenses),'',totals.expenses?'warning':'')+metric('EFECTIVO ESPERADO',money(totals.expectedCash));
   $('#cashStatus').textContent=cashData.open?'ABIERTA':'CERRADA'; $('#cashStatus').className=`badge ${cashData.open?'':'expired'}`; $('#cashToggle').textContent=cashData.open?'CERRAR CAJA':'ABRIR CAJA';
-  $('#cashSummary').innerHTML=movements.map(m=>`<div class="cash-row"><div><strong>${escapeHtml(m.note)}</strong><small>${formatDate(m.date,true)}</small></div><b class="${m.amount<0?'negative':''}">${m.amount>0?'+':''}${money(m.amount)}</b></div>`).join('')||'<div class="empty-state compact"><strong>Sin movimientos manuales</strong></div>';
-  $('#cashHistory').innerHTML=cashData.sessions.slice(0,8).map(s=>`<div class="timeline-row"><time>${formatDate(s.closedAt,true)}</time><div><strong>${money(s.total)}</strong><small>Apertura ${money(s.opening)}</small></div></div>`).join('')||'<div class="empty-state compact"><small>Todavía no hay cierres.</small></div>';
+  $('#cashSummary').innerHTML=movements.map(m=>`<div class="cash-row"><div><strong>${escapeHtml(m.reason||m.note)}</strong><small>${formatDate(m.occurredAt||m.date,true)}</small></div><b class="${m.type==='EXPENSE'?'negative':''}">${m.type==='INCOME'?'+':'-'}${money(m.amount)}</b></div>`).join('')||'<div class="empty-state compact"><strong>Sin movimientos manuales</strong></div>';
+  $('#cashHistory').innerHTML=cashData.sessions.slice(0,8).map(s=>`<div class="timeline-row"><time>${formatDate(s.closedAt,true)}</time><div><strong>${money(s.expectedCash??s.total)}</strong><small>Apertura ${money(s.openingCash??s.opening)} · Diferencia ${money(s.difference||0)}</small></div></div>`).join('')||'<div class="empty-state compact"><small>Todavía no hay cierres.</small></div>';
 }
 
 function barsHtml(entries) { const max=Math.max(...entries.map(x=>x[1]),1); return `<div class="bar-list">${entries.map(([name,value])=>`<div><label><span>${escapeHtml(name)}</span><b>${money(value)}</b></label><i><em style="width:${value/max*100}%"></em></i></div>`).join('')}</div>`; }
 function drawChart(id, values, colors=['#551128','#d3a72c']) { const c=$(`#${id}`); if(!c)return; const ctx=c.getContext('2d'), w=c.clientWidth||500, h=220, d=devicePixelRatio||1; c.width=w*d;c.height=h*d;ctx.scale(d,d);ctx.clearRect(0,0,w,h);const max=Math.max(...values.flatMap(v=>v.values),1);values.forEach((set,si)=>set.values.forEach((v,i)=>{const bw=(w-48)/set.values.length/values.length,x=32+i*(w-48)/set.values.length+si*bw,y=h-28-(v/max)*(h-55);ctx.fillStyle=colors[si];ctx.beginPath();ctx.roundRect(x,y,bw-4,h-28-y,4);ctx.fill();})); }
 function renderReports() { const revenue=sales.reduce((a,s)=>a+s.total,0), units=Object.values(unitsSold()).reduce((a,n)=>a+n,0); $('#reportMetrics').innerHTML=metric('INGRESOS',money(revenue))+metric('VENTAS',sales.length)+metric('UNIDADES',units)+metric('GANANCIA EST.',money(estimatedProfit())); const payments={};sales.forEach(s=>payments[s.paymentMethod]=(payments[s.paymentMethod]||0)+s.total);$('#paymentReport').innerHTML=barsHtml(Object.entries(payments));const cats={};sales.forEach(s=>s.items.forEach(i=>{const p=products.find(x=>x.id===i.id);cats[p?.category||'General']=(cats[p?.category||'General']||0)+i.price*i.quantity;}));$('#categoryReport').innerHTML=barsHtml(Object.entries(cats));$('#stockReport').innerHTML=`<div class="stat-list"><div><span>Stock bajo</span><b>${products.filter(p=>p.stock<=p.minStock).length}</b></div><div><span>Sin stock</span><b>${products.filter(p=>!p.stock).length}</b></div><div><span>Vencidos</span><b>${products.filter(p=>expirationState(p)==='expired').length}</b></div><div><span>Próximos</span><b>${products.filter(p=>['urgent','soon'].includes(expirationState(p))).length}</b></div></div>`;const days=[...Array(7)].map((_,i)=>{const d=today();d.setDate(d.getDate()-6+i);return daySales(d).reduce((a,s)=>a+s.total,0)});requestAnimationFrame(()=>drawChart('reportChart',[{values:days}])); }
-function renderFinance() { const daily=daySales().reduce((a,s)=>a+s.total,0), now=new Date(), monthly=sales.filter(s=>{const d=new Date(s.date);return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear()});const monthTotal=monthly.reduce((a,s)=>a+s.total,0),cost=monthly.reduce((a,s)=>a+s.items.reduce((n,i)=>n+productCost(i.id)*i.quantity,0),0),profit=estimatedProfit(monthly);$('#financeMetrics').innerHTML=metric('VENTAS DEL DÍA',money(daily))+metric('VENTAS DEL MES',money(monthTotal))+metric('GANANCIA EST.',money(profit))+metric('COSTO MERCADERÍA',money(cost))+metric('MARGEN',`${monthTotal?Math.round(profit/monthTotal*100):0}%`);const sold=unitsSold(),rank=products.map(p=>[p.name,(p.price-productCost(p.id))*(sold[p.id]||0)]).sort((a,b)=>b[1]-a[1]);$('#profitableProducts').innerHTML=barsHtml(rank.slice(0,5));$('#unprofitableProducts').innerHTML=barsHtml(rank.slice(-5).reverse());requestAnimationFrame(()=>drawChart('financeChart',[{values:[monthTotal]},{values:[cost]}])); }
+function renderFinance() { const daily=daySales().reduce((a,s)=>a+s.total,0), now=new Date(), monthly=sales.filter(s=>{const d=new Date(s.date);return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear()});const monthTotal=monthly.reduce((a,s)=>a+s.total,0),cost=monthly.reduce((a,s)=>a+s.items.reduce((n,i)=>n+number(i.costAtSale??i.costoPromedioAlVender)*number(i.quantity??i.cantidad),0),0),profit=estimatedProfit(monthly);$('#financeMetrics').innerHTML=metric('VENTAS DEL DÍA',money(daily))+metric('VENTAS DEL MES',money(monthTotal))+metric('GANANCIA EST.',money(profit))+metric('COSTO MERCADERÍA',money(cost))+metric('MARGEN',`${monthTotal?Math.round(profit/monthTotal*100):0}%`);const profitByProduct={};sales.forEach(s=>s.items.forEach(i=>profitByProduct[i.productId??i.id]=(profitByProduct[i.productId??i.id]||0)+number(i.estimatedProfit??i.gananciaEstimada)));const rank=products.map(p=>[p.name,profitByProduct[p.id]||0]).sort((a,b)=>b[1]-a[1]);$('#profitableProducts').innerHTML=barsHtml(rank.slice(0,5));$('#unprofitableProducts').innerHTML=barsHtml(rank.slice(-5).reverse());requestAnimationFrame(()=>drawChart('financeChart',[{values:[monthTotal]},{values:[cost]}])); }
 function renderBusiness() { applyBusinessTheme(); renderSuppliers(); renderCash(); renderReports(); renderFinance(); $('#settingBusinessName').value=business.name;$('#settingCurrency').value=business.currency;$('#settingColor').value=business.color;$('#settingGoal').value=business.goal;$('#settingTaxes').value=business.taxes;$('#settingVat').value=business.vat;$('#settingMinimumMargin').value=business.minimumMargin;$('#settingGeneralMargin').value=business.generalMargin ?? 30;$('#settingRounding').value=business.rounding; }
 const baseRenderAll=renderAll; renderAll=function renderEverything(){baseRenderAll();renderBusiness();};
 
 $('#addSupplier').addEventListener('click',()=>{const name=prompt('Nombre del proveedor:');if(!name)return;suppliers.push({id:uid(),name,company:prompt('Empresa:')||'',phone:prompt('Teléfono:')||'',email:prompt('Email:')||'',address:prompt('Dirección:')||'',notes:prompt('Observaciones:')||''});save();renderSuppliers();showToast('Proveedor agregado');});
 document.addEventListener('click',e=>{const del=e.target.closest('[data-supplier-delete]');if(del&&confirm('¿Eliminar este proveedor?')){suppliers=suppliers.filter(s=>s.id!==del.dataset.supplierDelete);save();renderSuppliers();}const cash=e.target.closest('[data-cash-action]');if(cash) handleCash(cash.dataset.cashAction);});
-function handleCash(action){if(action==='open'||action==='toggle'&&!cashData.open){const opening=number(prompt('Caja inicial:',cashData.opening||0));cashData.open=true;cashData.opening=opening;cashData.openedAt=new Date().toISOString();showToast('Caja abierta');}else if(action==='close'||action==='toggle'){const total=number(cashData.opening)+daySales().reduce((a,s)=>a+s.total,0)+cashData.movements.reduce((a,m)=>a+m.amount,0);cashData.sessions.unshift({openedAt:cashData.openedAt,closedAt:new Date().toISOString(),opening:cashData.opening,total});cashData.open=false;showToast('Caja cerrada');}else if(action==='movement'){if(!cashData.open)return showToast('Primero debés abrir la caja','error');const amount=number(prompt('Monto (negativo para egreso):'));if(!amount)return;cashData.movements.unshift({id:uid(),date:new Date().toISOString(),amount,note:prompt('Concepto:')||'Movimiento manual'});}save();renderCash();renderDashboard();}
+function handleCash(action){let result;if(action==='open'||action==='toggle'&&!cashData.open){const opening=prompt('Caja inicial:',cashData.opening||0);if(opening===null)return;result=CashService.openCashSession({openingCash:number(opening),userId:business.user},{cash:cashData,persist:save,uid});}
+  else if(action==='close'||action==='toggle'){const counted=prompt('Efectivo contado:');if(counted===null)return;result=CashService.closeCashSession({countedCash:number(counted)},{cash:cashData,sales,persist:save});}
+  else if(action==='movement'){const raw=prompt('Monto (negativo para egreso):');if(raw===null)return;const signed=number(raw),reason=prompt('Concepto:');result=CashService.registerCashMovement({amount:Math.abs(signed),type:signed<0?'EXPENSE':'INCOME',reason,userId:business.user},{cash:cashData,persist:save,uid});}
+  if(!result?.ok)return showToast(result?.message||'No se pudo completar la operación','error');showToast(action==='close'?'Caja cerrada':action==='movement'?'Movimiento registrado':'Caja abierta');renderCash();renderDashboard();}
 $('#businessSettings').addEventListener('submit',e=>{e.preventDefault();business={...business,name:$('#settingBusinessName').value.trim(),currency:$('#settingCurrency').value,color:$('#settingColor').value,goal:number($('#settingGoal').value),taxes:$('#settingTaxes').value,vat:number($('#settingVat').value),minimumMargin:Math.max(0,number($('#settingMinimumMargin').value)),generalMargin:Math.max(0,number($('#settingGeneralMargin').value)),rounding:$('#settingRounding').value};save();renderAll();showToast('Configuración guardada');});
 document.querySelector('.settings-actions').addEventListener('click',e=>{const a=e.target.closest('[data-settings-action]')?.dataset.settingsAction;if(a==='backup')$('#exportBackup').click();if(a==='restore')$('#importBackup').click();if(a==='inventory')$('#exportProductsCsv').click();if(a==='sales')exportSalesCsv();if(a==='clear')$('#clearAllData').click();});
 $('#topNewPurchase').addEventListener('click',()=>openPurchaseDialog());$('#topNewProduct').addEventListener('click',()=>openProductDialog());$('#topBackup').addEventListener('click',()=>$('#exportBackup').click());$('#globalSearch').addEventListener('focus',openCommandPalette);
